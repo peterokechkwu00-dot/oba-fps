@@ -3,7 +3,7 @@ import { createLayout } from './layout.js';
 
 export function buildOba() {
   const L = createLayout('oba', 'Oba, Anambra', { sky: '#9ccbe8', fog: '#cfe2ea', ground: 'laterite' });
-  const { box, shop, pickup, N, S, E, W, ROADS, DIRT, PALMS, UMBRELLAS, BILLBOARDS, CANOPIES } = L;
+  const { box, shop, enterable, pickup, N, S, E, W, ROADS, DIRT, PALMS, UMBRELLAS, BILLBOARDS, CANOPIES } = L;
   function keke(x, z, alongX = false) { return box(x, z, alongX ? 2.6 : 1.4, alongX ? 1.4 : 2.6, 1.7, 'keke', 0, { rot: alongX ? 1 : 0 }); }
   function danfo(x, z, alongX = false) { return box(x, z, alongX ? 5.5 : 2.2, alongX ? 2.2 : 5.5, 2.4, 'danfo', 0, { rot: alongX ? 1 : 0 }); }
 
@@ -28,7 +28,10 @@ shop(-36, -8, 4.5, 3, 'MAMA NKECHI KITCHEN', S, '#c0392b');
 shop(-30.5, -8, 4.5, 3, 'GOD IS GOOD VENTURES', S, '#1e8449', '#fff', '#e8d9a8');
 shop(8, -8, 4.5, 3, 'EBUKA PHONES & ACC.', S, '#2471a3', '#fff', '#cfd8dc');
 shop(13.5, -8, 4.5, 3, 'CHIDI PROVISION STORE', S, '#f1c40f', '#1a1a1a');
-shop(19, -8, 4, 3, 'OBA PHARMACY', S, '#16a085', '#fff', '#e0f2f1');
+enterable({ id: 'pharmacy', x: 19, z: -8, w: 4, d: 3, h: 3, floors: 1, c: '#e0f2f1', flavor: 'shop',
+  sign: { text: 'OBA PHARMACY', face: S, bg: '#16a085', fg: '#fff' },
+  doors: [{ face: S, at: 0, width: 1.6, height: 2.15 }],
+  stairs: false, parapet: false });
 shop(31, -8, 4.5, 3, 'IFEANYI BOUTIQUE', S, '#8e44ad', '#fff', '#f3e5f5');
 shop(36.5, -8, 4, 3, 'MTN • AIRTIME', S, '#ffcc00', '#000', '#fff8e1');
 // South side of the road (face north)
@@ -52,7 +55,8 @@ shop(-27, -12.5, 3, 2.5, 'TICKETS • ONITSHA/OWERRI', S, '#004d40', '#ffeb3b', 
 box(-22, -11, 0.25, 0.25, 4, 'pole'); box(-12, -11, 0.25, 0.25, 4, 'pole');
 BILLBOARDS.push({ x: -17, z: -11, y: 3.0, w: 10, h: 1.6, rot: 0, text: 'OBA MOTOR PARK', sub: 'ONITSHA • OWERRI • NNEWI • LAGOS', bg: '#1b5e20', fg: '#ffeb3b' });
 // West compound: two-storey house behind a fence
-box(-34, -27, 8, 8, 6, 'building', 0, { c: '#e6d3a3' });
+enterable({ id: 'house', x: -34, z: -27, w: 8, d: 8, h: 6, floors: 2, c: '#e6d3a3', flavor: 'house',
+  doors: [{ face: E, at: 0, width: 1.6, height: 2.2 }], stairs: true, parapet: true });
 box(-29.8, -18, 0.3, 9, 2, 'fence');
 box(-34.5, -13.6, 9.6, 0.3, 2, 'fence');
 PALMS.push({ x: -37, z: -17, h: 8 }, { x: -31, z: -36, h: 7 }, { x: -6.8, z: -37, h: 9 });
@@ -72,7 +76,9 @@ box(20, -35.5, 1.3, 1.3, 1.3, 'crate'); box(15, -19, 1, 1, 1, 'crate');
 box(17.5, -12, 0.25, 0.25, 4, 'pole'); box(26.5, -12, 0.25, 0.25, 4, 'pole');
 BILLBOARDS.push({ x: 22, z: -12, y: 3.0, w: 9, h: 1.5, rot: 0, text: 'OBA MARKET', sub: 'Welcome • Nnoo', bg: '#b71c1c', fg: '#fff' });
 // Market block (1 storey, roof access by stairs on the west side)
-box(33, -28, 8, 12, 3, 'building', 0, { c: '#f0e2c0', sign: { text: 'OBA MARKET UNION OFFICE', face: S, bg: '#0d47a1', fg: '#fff' } });
+enterable({ id: 'union', x: 33, z: -28, w: 8, d: 12, h: 3, floors: 1, c: '#f0e2c0', flavor: 'office',
+  sign: { text: 'OBA MARKET UNION OFFICE', face: S, bg: '#0d47a1', fg: '#fff' },
+  doors: [{ face: S, at: 1.8, width: 1.7, height: 2.2 }], stairs: false, parapet: false });
 for (let i = 0; i < 5; i++) box(28.5 - i, -31.5, 1, 3, 2.5 - 0.5 * i, 'concrete');
 box(36.85, -28, 0.3, 12, 1.1, 'parapet', 3);
 box(33, -33.85, 8, 0.3, 1.1, 'parapet', 3);
@@ -82,9 +88,13 @@ PALMS.push({ x: 37.5, z: -15, h: 8 }, { x: 6.5, z: -26, h: 7.5 });
 
 // ---- SW: Oba Plaza ----
 DIRT.push({ x: -24, z: 26, w: 22, d: 8 });
-box(-31, 27, 12, 10, 9, 'building', 0, { c: '#b0bec5', sign: { text: 'OBA PLAZA', face: E, bg: '#263238', fg: '#ffd54f' } });
+enterable({ id: 'plaza', x: -31, z: 27, w: 12, d: 10, h: 9, floors: 3, c: '#b0bec5', flavor: 'plaza',
+  sign: { text: 'OBA PLAZA', face: E, bg: '#263238', fg: '#ffd54f' },
+  doors: [{ face: E, at: 1.5, width: 1.8, height: 2.2 }], stairs: true, parapet: true });
 // One-storey wing with roof access (stairs on east side)
-box(-20, 18, 10, 8, 3.5, 'building', 0, { c: '#ffe0b2', sign: { text: 'UNITY BANK • ATM', face: N, bg: '#5d4037', fg: '#fff' } });
+enterable({ id: 'bank', x: -20, z: 18, w: 10, d: 8, h: 3.5, floors: 1, c: '#ffe0b2', flavor: 'bank',
+  sign: { text: 'UNITY BANK • ATM', face: N, bg: '#5d4037', fg: '#fff' },
+  doors: [{ face: N, at: -1.5, width: 1.7, height: 2.2 }], stairs: false, parapet: false });
 for (let i = 0; i < 6; i++) box(-14.5 + i, 20.5, 1, 3, 3.0 - 0.5 * i, 'concrete');
 box(-20, 14.15, 10, 0.3, 1.1, 'parapet', 3.5);
 box(-24.85, 18, 0.3, 8, 1.1, 'parapet', 3.5);
@@ -103,7 +113,9 @@ for (const px of [25, 35]) for (const pz of [14, 20]) box(px, pz, 0.5, 0.5, 4.5,
 box(28, 17, 0.9, 0.7, 1.5, 'pump'); box(32, 17, 0.9, 0.7, 1.5, 'pump');
 box(37.5, 11.5, 0.25, 0.25, 4.5, 'pole');
 BILLBOARDS.push({ x: 37.5, z: 11.6, y: 4.0, w: 4, h: 1.3, rot: 0, text: 'OBA FILLING STN', sub: 'PMS ₦ • DIESEL', bg: '#c62828', fg: '#fff' });
-box(30, 28, 10, 7, 6, 'building', 0, { c: '#fff9c4', sign: { text: 'ST. MICHAEL\'S CATHOLIC CHURCH', face: N, bg: '#fafafa', fg: '#1a237e' } });
+enterable({ id: 'church', x: 30, z: 28, w: 10, d: 7, h: 6, floors: 2, c: '#fff9c4', flavor: 'church',
+  sign: { text: "ST. MICHAEL'S CATHOLIC CHURCH", face: N, bg: '#fafafa', fg: '#1a237e' },
+  doors: [{ face: N, at: 0, width: 1.8, height: 2.3 }], stairs: true, parapet: true });
 box(14, 30, 8, 7, 3, 'building', 0, { c: '#ffccbc', sign: { text: 'ADAORA FASHION HOUSE', face: N, bg: '#ad1457', fg: '#fff' } });
 box(20.5, 22, 6, 0.3, 2, 'fence');
 box(10, 22, 1.4, 1.4, 1.4, 'crate'); box(20, 36.5, 1.3, 1.3, 1.3, 'crate');
@@ -142,6 +154,10 @@ box(2.6, 12, 1, 1, 1, 'crate'); box(-2.5, -12, 1, 1, 1, 'crate');
   pickup('ammo', 30, 14);
   pickup('ammo', -5, 6);
   pickup('ammo', -26, 14);
+  // Indoor: plaza ground & first floor, church nave
+  pickup('med', -31, 27);
+  pickup('ammo', -31, 27, 3);
+  pickup('ammo', 30, 28);
 
   return L.finish();
 }

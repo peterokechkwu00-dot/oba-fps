@@ -359,9 +359,16 @@ function physics(dt) {
   me.vel.y -= 20 * dt;
   const wasGround = me.onGround;
   moveAxis(0, me.vel.x * dt); moveAxis(2, me.vel.z * dt);
+  const yBefore = me.pos.y;
   me.pos.y += me.vel.y * dt; me.onGround = false;
   if (me.pos.y <= 0) { me.pos.y = 0; me.vel.y = Math.max(0, me.vel.y); me.onGround = true; }
   for (const a of AABBS) {
+    const over = me.pos.x + R > a.min[0] && me.pos.x - R < a.max[0] && me.pos.z + R > a.min[2] && me.pos.z - R < a.max[2];
+    if (!over) continue;
+    // Catch thin floor slabs that a fast fall would otherwise tunnel through.
+    if (me.vel.y <= 0 && yBefore >= a.max[1] - 1e-4 && me.pos.y < a.max[1]) {
+      me.pos.y = a.max[1]; me.vel.y = 0; me.onGround = true; continue;
+    }
     if (!overlapsAt(me.pos.x, me.pos.y, me.pos.z, a)) continue;
     if (me.vel.y <= 0) { me.pos.y = a.max[1]; me.vel.y = 0; me.onGround = true; } else { me.pos.y = a.min[1] - H - 1e-3; me.vel.y = 0; }
   }

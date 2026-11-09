@@ -3,7 +3,7 @@ import { createLayout } from './layout.js';
 
 export function buildOnitsha() {
   const L = createLayout('onitsha', 'Onitsha Main Market', { sky: '#b7d4e6', fog: '#d5e4ec', ground: 'laterite' });
-  const { box, shop, pickup, perimeter, N, S, E, W, ROADS, DIRT, PALMS, UMBRELLAS, BILLBOARDS, RIVERS } = L;
+  const { box, shop, enterable, pickup, perimeter, N, S, E, W, ROADS, DIRT, PALMS, UMBRELLAS, BILLBOARDS, RIVERS } = L;
   perimeter(5);
 
   // Niger River + bridge backdrop (west, just outside the wall)
@@ -54,18 +54,26 @@ export function buildOnitsha() {
   stallBlock([24, 29, 34], [14, 22, 30]);
 
   // Warehouses along the north, with roof access
-  box(-22, -36, 22, 7, 5, 'building', 0, { c: '#b0bec5', sign: { text: 'WAREHOUSE A — IMPORTERS', face: S, bg: '#263238', fg: '#ffd54f' } });
+  enterable({ id: 'warehouse-a', x: -22, z: -36, w: 22, d: 7, h: 5, floors: 1, c: '#b0bec5', flavor: 'warehouse',
+    sign: { text: 'WAREHOUSE A — IMPORTERS', face: S, bg: '#263238', fg: '#ffd54f' },
+    doors: [{ face: S, at: -6, width: 2.0, height: 2.4 }], stairs: true, parapet: false });
   for (let i = 0; i < 8; i++) box(-11.5 + i * 0.9, -32, 1, 3, 4.5 - 0.55 * i, 'concrete');
   box(-22, -32.6, 22, 0.3, 1.0, 'parapet', 5);
   box(-32.85, -36, 0.3, 7, 1.0, 'parapet', 5);
-  box(22, -36, 22, 7, 5, 'building', 0, { c: '#90a4ae', sign: { text: 'WAREHOUSE B — WHOLESALE', face: S, bg: '#37474f', fg: '#fff' } });
+  enterable({ id: 'warehouse-b', x: 22, z: -36, w: 22, d: 7, h: 5, floors: 1, c: '#90a4ae', flavor: 'warehouse',
+    sign: { text: 'WAREHOUSE B — WHOLESALE', face: S, bg: '#37474f', fg: '#fff' },
+    doors: [{ face: S, at: 6, width: 2.0, height: 2.4 }], stairs: true, parapet: false });
   for (let i = 0; i < 8; i++) box(11.5 - i * 0.9, -32, 1, 3, 4.5 - 0.55 * i, 'concrete');
   box(22, -32.6, 22, 0.3, 1.0, 'parapet', 5);
   box(32.85, -36, 0.3, 7, 1.0, 'parapet', 5);
 
   // South warehouses / packing sheds
-  box(-30, 36, 16, 7, 4, 'building', 0, { c: '#cfd8dc', sign: { text: 'PACKING SHED', face: N, bg: '#455a64', fg: '#fff' } });
-  box(8, 36, 18, 7, 4, 'building', 0, { c: '#bcaaa4', sign: { text: 'NIGER BRIDGE STORES', face: N, bg: '#4e342e', fg: '#ffe082' } });
+  enterable({ id: 'packing', x: -30, z: 36, w: 16, d: 7, h: 4, floors: 1, c: '#cfd8dc', flavor: 'shed',
+    sign: { text: 'PACKING SHED', face: N, bg: '#455a64', fg: '#fff' },
+    doors: [{ face: N, at: -3, width: 1.8, height: 2.3 }], stairs: true, parapet: false });
+  enterable({ id: 'bridge-stores', x: 8, z: 36, w: 18, d: 7, h: 4, floors: 1, c: '#bcaaa4', flavor: 'warehouse',
+    sign: { text: 'NIGER BRIDGE STORES', face: N, bg: '#4e342e', fg: '#ffe082' },
+    doors: [{ face: N, at: 4, width: 1.8, height: 2.3 }], stairs: true, parapet: false });
   for (let i = 0; i < 6; i++) box(17 + i, 32.5, 1, 3, 3.5 - 0.55 * i, 'concrete');
   box(8, 32.6, 18, 0.3, 1.0, 'parapet', 4);
 
@@ -97,6 +105,9 @@ export function buildOnitsha() {
   pickup('ammo', -22, 22);
   pickup('ammo', 16, 20);
   pickup('ammo', 28, -36, 5);       // warehouse B roof
+  pickup('med', -22, -36);          // inside warehouse A
+  pickup('ammo', 22, -36);          // inside warehouse B
+  pickup('ammo', -30, 36);          // inside packing shed
 
   return L.finish();
 }

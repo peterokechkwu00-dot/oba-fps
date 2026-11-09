@@ -3,7 +3,7 @@ import { createLayout } from './layout.js';
 
 export function buildAwka() {
   const L = createLayout('awka', 'Awka Barracks', { sky: '#c5d4b0', fog: '#d7dcc8', ground: 'laterite' });
-  const { box, shop, pickup, perimeter, N, S, E, W, ROADS, DIRT, PALMS, BILLBOARDS } = L;
+  const { box, shop, enterable, pickup, perimeter, N, S, E, W, ROADS, DIRT, PALMS, BILLBOARDS } = L;
   perimeter(6);
 
   ROADS.push({ x: 0, z: 16, w: 80, d: 8, main: true }); // inner road
@@ -16,11 +16,21 @@ export function buildAwka() {
   box(-7, 20.5, 0.3, 0.3, 5, 'pole'); box(7, 20.5, 0.3, 0.3, 5, 'pole');
 
   // HQ / barracks buildings — kept clear of corner watchtowers
-  box(0, -30, 22, 8, 6, 'building', 0, { c: '#cfd8dc', sign: { text: '82 DIVISION HQ', face: S, bg: '#1b5e20', fg: '#ffeb3b' } });
-  box(-22, 32, 16, 8, 4, 'building', 0, { c: '#b0bec5', sign: { text: 'BARRACKS A', face: N, bg: '#33691e', fg: '#fff' } });
-  box(22, 32, 16, 8, 4, 'building', 0, { c: '#b0bec5', sign: { text: 'BARRACKS B', face: N, bg: '#33691e', fg: '#fff' } });
-  box(30, -16, 10, 8, 4, 'building', 0, { c: '#90a4ae', sign: { text: 'ARMOURY', face: W, bg: '#b71c1c', fg: '#fff' } });
-  box(-30, -16, 10, 8, 4, 'building', 0, { c: '#a5d6a7', sign: { text: 'SICK BAY', face: E, bg: '#004d40', fg: '#fff' } });
+  enterable({ id: 'hq', x: 0, z: -30, w: 22, d: 8, h: 6, floors: 2, c: '#cfd8dc', flavor: 'office',
+    sign: { text: '82 DIVISION HQ', face: S, bg: '#1b5e20', fg: '#ffeb3b' },
+    doors: [{ face: S, at: -4, width: 1.8, height: 2.2 }], stairs: true, parapet: false });
+  enterable({ id: 'barracks-a', x: -22, z: 32, w: 16, d: 8, h: 4, floors: 1, c: '#b0bec5', flavor: 'barracks',
+    sign: { text: 'BARRACKS A', face: N, bg: '#33691e', fg: '#fff' },
+    doors: [{ face: N, at: 3, width: 1.7, height: 2.2 }], stairs: true, parapet: true });
+  enterable({ id: 'barracks-b', x: 22, z: 32, w: 16, d: 8, h: 4, floors: 1, c: '#b0bec5', flavor: 'barracks',
+    sign: { text: 'BARRACKS B', face: N, bg: '#33691e', fg: '#fff' },
+    doors: [{ face: N, at: -3, width: 1.7, height: 2.2 }], stairs: true, parapet: true });
+  enterable({ id: 'armoury', x: 30, z: -16, w: 10, d: 8, h: 4, floors: 1, c: '#90a4ae', flavor: 'armoury',
+    sign: { text: 'ARMOURY', face: W, bg: '#b71c1c', fg: '#fff' },
+    doors: [{ face: W, at: 1.5, width: 1.7, height: 2.2 }], stairs: false, parapet: false });
+  enterable({ id: 'sickbay', x: -30, z: -16, w: 10, d: 8, h: 4, floors: 1, c: '#a5d6a7', flavor: 'sickbay',
+    sign: { text: 'SICK BAY', face: E, bg: '#004d40', fg: '#fff' },
+    doors: [{ face: E, at: -1.5, width: 1.7, height: 2.2 }], stairs: true, parapet: true });
   shop(0, 34, 8, 4, 'CHECK POINT • ID', S, '#33691e', '#ffeb3b', '#c8e6c9', 3);
 
   // Stairs onto HQ roof (south face, toward the parade ground)
@@ -62,9 +72,12 @@ export function buildAwka() {
   bags(-8, 22, 8, 1.2); bags(8, 22, 8, 1.2);
 
   // Bunkers
-  box(-16, -6, 7, 5, 2.0, 'bunker');
-  box(16, -6, 7, 5, 2.0, 'bunker');
-  box(0, -18, 6, 4, 1.8, 'bunker');
+  enterable({ id: 'bunker-w', x: -16, z: -6, w: 7, d: 5, h: 2.5, floors: 1, c: '#5d6456', flavor: 'bunker',
+    doors: [{ face: S, at: 0, width: 1.5, height: 2.0 }], stairs: false, parapet: false });
+  enterable({ id: 'bunker-e', x: 16, z: -6, w: 7, d: 5, h: 2.5, floors: 1, c: '#5d6456', flavor: 'bunker',
+    doors: [{ face: S, at: 0, width: 1.5, height: 2.0 }], stairs: false, parapet: false });
+  enterable({ id: 'bunker-s', x: 0, z: -18, w: 6, d: 4, h: 2.5, floors: 1, c: '#5d6456', flavor: 'bunker',
+    doors: [{ face: S, at: 1.2, width: 1.4, height: 2.0 }], stairs: false, parapet: false });
 
   // Inner fences
   box(-16, 28, 0.3, 16, 2, 'fence');
@@ -100,6 +113,10 @@ export function buildAwka() {
   pickup('ammo', 16, -10);
   pickup('ammo', -14, 10);
   pickup('ammo', 36, 36, 6.35);      // south-east tower
+  pickup('med', 0, -30);             // inside HQ
+  pickup('ammo', -22, 32);           // inside barracks A
+  pickup('ammo', -30, -16);          // inside sick bay
+  pickup('med', -16, -6);            // inside west bunker
 
   return L.finish();
 }

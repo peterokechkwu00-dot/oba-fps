@@ -1,5 +1,6 @@
 // Builds a map arena: canvas-generated textures, buildings, shops, signs, vehicles, palms.
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { getMap, DEFAULT_MAP } from './shared/map.js';
 
 let maxAniso = 4;
@@ -105,6 +106,12 @@ const T = {
     speckle(g, w, h, 900, [shade(color, 0.85), shade(color, 1.1), '#7a6a50'], 3);
     g.fillStyle = 'rgba(120,50,20,0.25)'; g.fillRect(0, h - 18, w, 18);
   }, 'paint' + color),
+  tile: (color) => canvasTex(128, 128, (g, w, h) => {
+    g.fillStyle = color; g.fillRect(0, 0, w, h);
+    speckle(g, w, h, 500, [shade(color, 0.9), shade(color, 1.08), '#8a7a60'], 2);
+    g.strokeStyle = 'rgba(60,40,20,0.28)'; g.lineWidth = 2;
+    for (let i = 0; i <= 4; i++) { g.beginPath(); g.moveTo(i * 32, 0); g.lineTo(i * 32, h); g.stroke(); g.beginPath(); g.moveTo(0, i * 32); g.lineTo(w, i * 32); g.stroke(); }
+  }, 'tile' + color),
   stripes: (a, b, n = 6, vertical = false) => canvasTex(128, 128, (g, w, h) => {
     for (let i = 0; i < n; i++) { g.fillStyle = i % 2 ? b : a; if (vertical) g.fillRect(i * w / n, 0, w / n + 1, h); else g.fillRect(0, i * h / n, w, h / n + 1); }
   }, `str${a}${b}${n}${vertical}`),
@@ -193,6 +200,28 @@ const FACE_INDEX = { e: 0, w: 1, s: 4, n: 5 };
 
 function addMesh(scene, geo, material, x, y, z, cast = true, receive = true) {
   const m = new THREE.Mesh(geo, material); m.position.set(x, y, z); m.castShadow = cast; m.receiveShadow = receive; scene.add(m); return m;
+}
+
+function queueMesh(store, geo, material, x, y, z, cast = true, receive = true) {
+  const g = geo.clone();
+  g.translate(x, y, z);
+  const key = material.uuid + (cast ? 'c' : '') + (receive ? 'r' : '');
+  if (!store.has(key)) store.set(key, { material, geos: [], cast, receive });
+  store.get(key).geos.push(g);
+}
+
+function flushQueued(root, store, colliders) {
+  for (const b of store.values()) {
+    if (!b.geos.length) continue;
+    const merged = mergeGeometries(b.geos, false);
+    for (const g of b.geos) g.dispose();
+    if (!merged) continue;
+    const m = new THREE.Mesh(merged, b.material);
+    m.castShadow = b.cast; m.receiveShadow = b.receive;
+    root.add(m);
+    if (colliders) colliders.push(m);
+  }
+  store.clear();
 }
 
 function buildKeke(rot) {
@@ -289,6 +318,8 @@ export function buildWorld(scene, renderer, opts = {}) {
   clearWorld(scene);
   const root = new THREE.Group(); root.name = '__world'; scene.add(root);
   const colliders = [];
+  const solidBatches = new Map();
+  const ghostBatches = new Map();
 
   const sky = (theme && theme.sky) || '#9ccbe8';
   const fog = (theme && theme.fog) || '#cfe2ea';
@@ -387,9 +418,32 @@ export function buildWorld(scene, renderer, opts = {}) {
       case 'danfo': { const m = buildDanfo(b.rot); m.position.set(b.x, b.y, b.z); root.add(m); mesh = addMesh(root, new THREE.BoxGeometry(b.w, b.h, b.d), invisible, cx, cy, cz, false, false); break; }
       case 'truck': { const m = buildTruck(b.rot, b.c); m.position.set(b.x, b.y, b.z); root.add(m); mesh = addMesh(root, new THREE.BoxGeometry(b.w, b.h, b.d), invisible, cx, cy, cz, false, false); break; }
       case 'palm': mesh = addMesh(root, new THREE.BoxGeometry(b.w, b.h, b.d), invisible, cx, cy, cz, false, false); break;
+      case 'iwall':
+        queueMesh(solidBatches, boxGeo(b.w, b.h, b.d, 3, 3), mat(T.painted(b.c || '#c9b7a4')), cx, cy, cz);
+        break;
+      case 'floor':
+        queueMesh(b.solid === false ? ghostBatches : solidBatches, boxGeo(b.w, b.h, b.d, 2, 2), mat(T.concrete(), { color: b.c || '#d8d0c4' }), cx, cy, cz);
+        break;
+      case 'ifloor':
+        queueMesh(ghostBatches, boxGeo(b.w, b.h, b.d, 2, 2), mat(T.tile(b.c || '#c4b49a')), cx, cy, cz, false, true);
+        break;
+      case 'stair':
+        queueMesh(solidBatches, boxGeo(b.w, b.h, b.d, 2), concreteMat, cx, cy, cz);
+        break;
+      case 'table':
+      case 'counter':
+      case 'pew':
+        mesh = addMesh(root, boxGeo(b.w, b.h, b.d, b.w, b.h), mat(T.wood()), cx, cy, cz);
+        break;
+      case 'shelf':
+        mesh = addMesh(root, boxGeo(b.w, b.h, b.d, 1, 1), mat(T.wood()), cx, cy, cz);
+        break;
+      case 'facade':
+        if (b.tank) addMesh(root, new THREE.CylinderGeometry(0.7, 0.7, 1.4, 12), mat(null, { color: '#263238' }), cx + b.w / 4, b.y + b.h + 0.7, cz - b.d / 4);
+        break;
       default: mesh = addMesh(root, boxGeo(b.w, b.h, b.d), concreteMat, cx, cy, cz);
     }
-    colliders.push(mesh);
+    if (mesh && b.solid !== false) colliders.push(mesh);
     if (b.sign) {
       const faceW = (b.sign.face === 'n' || b.sign.face === 's') ? b.w : b.d;
       const sw = Math.min(faceW * 0.92, b.k === 'building' ? 9 : 5), sh = b.k === 'building' ? Math.min(1.4, sw / 4) : 0.75;
@@ -398,6 +452,20 @@ export function buildWorld(scene, renderer, opts = {}) {
       placeOnFace(plane, b, 0.12, sy); root.add(plane);
     }
   }
+  flushQueued(root, solidBatches, colliders);
+  flushQueued(root, ghostBatches, null);
+
+  const lights = map.LIGHTS || [];
+  const bulbMat = new THREE.MeshBasicMaterial({ color: '#ffe0a0' });
+  const cap = low ? 0 : 8;
+  lights.forEach((l, i) => {
+    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 8), bulbMat);
+    bulb.position.set(l.x, l.y, l.z); root.add(bulb);
+    if (i < cap) {
+      const pt = new THREE.PointLight(l.color || '#ffd9a0', l.intensity || 1.8, l.distance || 10, 2);
+      pt.position.set(l.x, l.y, l.z); pt.castShadow = false; root.add(pt);
+    }
+  });
 
   for (const sign of BILLBOARDS) {
     const tex = signTexture(sign.text, sign.sub, sign.bg, sign.fg, sign.w / sign.h);

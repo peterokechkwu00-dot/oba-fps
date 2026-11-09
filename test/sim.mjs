@@ -5,7 +5,7 @@ import WebSocket from 'ws';
 import { spawn as spawnProc } from 'child_process';
 import { fileURLToPath } from 'url';
 import path from 'path';
-import { getMap, listMaps, rayMap, PLAYER_RADIUS as PR, PLAYER_HEIGHT as PH, DEFAULT_MAP } from '../public/shared/map.js';
+import { getMap, listMaps, rayMap, standHeight, PLAYER_RADIUS as PR, PLAYER_HEIGHT as PH, DEFAULT_MAP } from '../public/shared/map.js';
 
 const URL = process.argv[2] || `ws://localhost:${process.env.PORT || 3000}/ws`;
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -136,7 +136,9 @@ try {
   check(DEFAULT_MAP === 'oba', 'default map is oba');
   for (const { id, name } of listMaps()) {
     const m = getMap(id);
-    check(m.id === id && m.name === name && m.AABBS.length === m.BOXES.length, `${id}: id/name/aabbs match`);
+    const solids = m.BOXES.filter(b => b.solid !== false);
+    check(m.id === id && m.name === name && m.AABBS.length === solids.length, `${id}: id/name/aabbs match`);
+    check(Array.isArray(m.INTERIORS) && m.INTERIORS.length >= 3, `${id}: ${m.INTERIORS?.length || 0} enterable buildings`);
     check(m.SPAWNS.length >= 8, `${id}: ${m.SPAWNS.length} spawn points`);
     const blocked = m.SPAWNS.filter(s => m.AABBS.some(a => overlapsPlayer(s[0], 0, s[1], a)));
     check(blocked.length === 0, `${id}: all spawns are walkable`);
@@ -154,6 +156,39 @@ try {
   check(shed < 20, `nnewi west shed blocks a shot west from the yard (t=${shed.toFixed(2)})`);
   const hq = rayMap([0, 1.6, -16], [0, 0, -1], getMap('awka').AABBS);
   check(hq < 16, `awka HQ blocks a shot north across the parade ground (t=${hq.toFixed(2)})`);
+
+  // Enterable interiors: walkable floors, shots through windows, walls still block
+  for (const { id } of listMaps()) {
+    const m = getMap(id);
+    const indoor = (m.PICKUPS || []).filter(pk => m.INTERIORS.some(b =>
+      pk.x >= b.x - b.w / 2 + 0.4 && pk.x <= b.x + b.w / 2 - 0.4 &&
+      pk.z >= b.z - b.d / 2 + 0.4 && pk.z <= b.z + b.d / 2 - 0.4));
+    check(indoor.length >= 1, `${id}: at least one indoor pickup (${indoor.length})`);
+    for (const b of m.INTERIORS) {
+      const stuck = m.AABBS.some(a =>
+        b.inside[0] + PR > a.min[0] && b.inside[0] - PR < a.max[0] &&
+        b.inside[1] + PR > a.min[2] && b.inside[1] - PR < a.max[2] &&
+        0 + PH > a.min[1] && 0 < a.max[1]);
+      check(!stuck, `${id}/${b.id}: ground floor interior is walkable`);
+      for (const lv of (b.levels || [])) {
+        if (lv.y <= 0) continue;
+        const sh = standHeight(lv.x, lv.z, m.AABBS, lv.y + 0.05);
+        const bodyHit = m.AABBS.some(a =>
+          lv.x + PR > a.min[0] && lv.x - PR < a.max[0] &&
+          lv.z + PR > a.min[2] && lv.z - PR < a.max[2] &&
+          lv.y + PH > a.min[1] && lv.y < a.max[1]);
+        check(Math.abs(sh - lv.y) < 0.3 && !bodyHit, `${id}/${b.id}: floor at y=${lv.y.toFixed(2)} is standable (stand=${sh.toFixed(2)})`);
+      }
+      if (b.window) {
+        const t = rayMap(b.window.o, b.window.d, m.AABBS);
+        check(t > b.window.through, `${id}/${b.id}: shot through a window (t=${t.toFixed(2)} > ${b.window.through.toFixed(2)})`);
+      }
+      if (b.wall) {
+        const t = rayMap(b.wall.o, b.wall.d, m.AABBS);
+        check(t < b.wall.maxT, `${id}/${b.id}: wall still blocks a shot (t=${t.toFixed(2)})`);
+      }
+    }
+  }
 } catch (e) { ok = false; log('ERROR', e.message); }
 
 function waitListen(child, ms = 8000) {

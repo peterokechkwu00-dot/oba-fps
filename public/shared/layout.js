@@ -1,4 +1,6 @@
 // Shared layout helpers used to author every map (server + client).
+import { addEnterable } from './interior.js';
+
 export const N = 'n', S = 's', E = 'e', W = 'w';
 
 export function createLayout(id, name, theme = {}) {
@@ -11,6 +13,8 @@ export function createLayout(id, name, theme = {}) {
   const CANOPIES = [];
   const RIVERS = [];
   const PICKUPS = [];
+  const LIGHTS = [];
+  const INTERIORS = [];
   let SPAWNS = [];
   const ARENA_HALF = theme.arenaHalf || 40;
 
@@ -29,22 +33,23 @@ export function createLayout(id, name, theme = {}) {
     box(-ARENA_HALF - 0.5, 0, 1, ARENA_HALF * 2 + 2, h, 'wall');
     box(ARENA_HALF + 0.5, 0, 1, ARENA_HALF * 2 + 2, h, 'wall');
   }
+  function enterable(opts) { return addEnterable({ box, BOXES, LIGHTS, INTERIORS }, opts); }
   function finish() {
     for (const p of PALMS) box(p.x, p.z, 0.5, 0.5, p.h, 'palm', 0, { invisible: true });
-    const AABBS = BOXES.map(b => ({
+    const AABBS = BOXES.filter(b => b.solid !== false).map(b => ({
       min: [b.x - b.w / 2, b.y, b.z - b.d / 2],
       max: [b.x + b.w / 2, b.y + b.h, b.z + b.d / 2],
     }));
     return {
       id, name, theme, ARENA_HALF, BOXES, AABBS, ROADS, DIRT, PALMS, UMBRELLAS,
-      BILLBOARDS, CANOPIES, RIVERS, PICKUPS, SPAWNS,
+      BILLBOARDS, CANOPIES, RIVERS, PICKUPS, SPAWNS, LIGHTS, INTERIORS,
     };
   }
   return {
-    BOXES, ROADS, DIRT, PALMS, UMBRELLAS, BILLBOARDS, CANOPIES, RIVERS, PICKUPS,
+    BOXES, ROADS, DIRT, PALMS, UMBRELLAS, BILLBOARDS, CANOPIES, RIVERS, PICKUPS, LIGHTS, INTERIORS,
     get SPAWNS() { return SPAWNS; },
     set SPAWNS(v) { SPAWNS = v; },
-    box, shop, pickup, perimeter, finish, N, S, E, W, ARENA_HALF,
+    box, shop, pickup, perimeter, enterable, finish, N, S, E, W, ARENA_HALF,
   };
 }
 
@@ -68,6 +73,15 @@ export function rayMap(o, d, aabbs) {
   for (const a of aabbs) { const t = rayAABB(o, d, a); if (t < best) best = t; }
   if (d[1] < -1e-6) { const t = -o[1] / d[1]; if (t >= 0 && t < best) best = t; }
   return best;
+}
+
+/** Highest walkable surface under (x, z) whose top is at or below `cap`. */
+export function standHeight(x, z, aabbs, cap = 40) {
+  let y = 0;
+  for (const a of aabbs) {
+    if (x >= a.min[0] && x <= a.max[0] && z >= a.min[2] && z <= a.max[2] && a.max[1] <= cap + 1e-6 && a.max[1] > y) y = a.max[1];
+  }
+  return y;
 }
 
 // Gameplay constants (shared by server and client).

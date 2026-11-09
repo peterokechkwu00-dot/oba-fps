@@ -7,7 +7,7 @@ import { WebSocketServer } from 'ws';
 import {
   getMap, listMaps, DEFAULT_MAP, rayMap,
   MAX_HP, MAX_ARMOUR, BODY_DMG, HEAD_DMG, FIRE_INTERVAL, RESPAWN_MS,
-  EYE_HEIGHT, HEAD_Y, CHEST_Y, PLAYER_RADIUS, MAG_SIZE, RESERVE_AMMO, MAX_RESERVE,
+  EYE_HEIGHT, HEAD_Y, CHEST_Y, PLAYER_RADIUS, PLAYER_HEIGHT, MAG_SIZE, RESERVE_AMMO, MAX_RESERVE,
   AMMO_GIVE, MED_HEAL, ARMOUR_GIVE, ARMOUR_ABSORB, REGEN_DELAY, REGEN_RATE,
   PICKUP_RADIUS, MED_RESPAWN, ARM_RESPAWN, AMMO_RESPAWN,
 } from './public/shared/map.js';
@@ -350,7 +350,8 @@ function botBlocked(x, z) {
   const r = PLAYER_RADIUS + 0.1;
   if (Math.abs(x) > ARENA_HALF - 1 || Math.abs(z) > ARENA_HALF - 1) return true;
   for (const a of AABBS) {
-    if (a.min[1] > 1) continue;
+    // Ignore floors/lintels that a ground-level bot would walk under or stand beneath.
+    if (a.min[1] >= PLAYER_HEIGHT || a.max[1] <= 0.05) continue;
     if (x + r > a.min[0] && x - r < a.max[0] && z + r > a.min[2] && z - r < a.max[2]) return true;
   }
   return false;

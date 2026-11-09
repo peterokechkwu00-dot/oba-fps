@@ -12,7 +12,12 @@ round, players vote for the next map:
 - **Nnewi Industrial** — auto-parts yard, factory sheds, containers, cranes and catwalks
 - **Awka Barracks** — a military compound with sandbags, watchtowers, bunkers, trucks and a perimeter wall
 
-Everything (textures, signboards, sounds) is generated in code. There are no external assets.
+Key buildings on every map are **enterable**: hollow wall segments with door and window openings,
+interior rooms, floors and ceilings, stairs up to upper floors and roofs, and simple cover (tables,
+shelves, counters, crates). You can see and shoot through windows and doors; walls still stop bullets.
+A few pickups sit inside. Bots stay on the ground floor so they do not get stuck on stairs.
+
+Most textures, signboards and sounds are generated in code. Third-person soldiers use a bundled Mixamo glTF.
 
 ## Run locally
 
@@ -169,7 +174,8 @@ a tie is broken at random. The current map name is shown in the HUD, the menu an
   client, then validated on the server: the shot origin must be near the shooter, the ray must pass close to
   the target's last known position, there must be no wall in between, and the fire rate is limited.
 - `public/shared/maps.js`: registry of every map, loaded by id. Each map owns its collision boxes, spawns,
-  pickups and bot-navigable layout.
+  pickups, enterable interiors and bot-navigable layout.
+- `public/shared/interior.js`: helper that hollows a building into walls, floors, stairs, props and lights.
 - `public/shared/map-oba.js`, `map-onitsha.js`, `map-nnewi.js`, `map-awka.js`: the four arenas.
 - `public/shared/layout.js`: shared helpers and gameplay constants.
 - `public/world.js`: builds (and rebuilds) the 3D scene and canvas textures for the active map.

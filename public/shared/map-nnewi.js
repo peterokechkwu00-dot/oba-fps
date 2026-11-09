@@ -3,7 +3,7 @@ import { createLayout } from './layout.js';
 
 export function buildNnewi() {
   const L = createLayout('nnewi', 'Nnewi Industrial', { sky: '#9aaeb8', fog: '#c5cdd0', ground: 'concrete' });
-  const { box, shop, pickup, perimeter, N, S, E, W, ROADS, DIRT, BILLBOARDS, CANOPIES } = L;
+  const { box, shop, enterable, pickup, perimeter, N, S, E, W, ROADS, DIRT, BILLBOARDS, CANOPIES } = L;
   perimeter(6);
 
   ROADS.push({ x: 0, z: 0, w: 80, d: 10, main: true });
@@ -18,12 +18,16 @@ export function buildNnewi() {
   box(-8, -6.5, 0.3, 0.3, 5.2, 'pole'); box(8, -6.5, 0.3, 0.3, 5.2, 'pole');
 
   // Factory sheds (west and east) with roof access
-  box(-28, -16, 18, 36, 5, 'building', 0, { c: '#78909c', sign: { text: 'MACHINE SHOP A', face: E, bg: '#263238', fg: '#ffd54f' } });
+  enterable({ id: 'shop-a', x: -28, z: -16, w: 18, d: 36, h: 5, floors: 1, c: '#78909c', flavor: 'factory',
+    sign: { text: 'MACHINE SHOP A', face: E, bg: '#263238', fg: '#ffd54f' },
+    doors: [{ face: E, at: 8, width: 2.2, height: 2.5 }], stairs: true, parapet: false });
   for (let i = 0; i < 8; i++) box(-18.5 + i, 2, 1.1, 4, 4.5 - 0.55 * i, 'concrete');
   box(-19, -16, 0.3, 36, 1.1, 'parapet', 5);
   box(-28, 1.85, 18, 0.3, 1.1, 'parapet', 5);
 
-  box(28, 12, 18, 36, 5, 'building', 0, { c: '#90a4ae', sign: { text: 'MACHINE SHOP B', face: W, bg: '#37474f', fg: '#fff' } });
+  enterable({ id: 'shop-b', x: 28, z: 12, w: 18, d: 36, h: 5, floors: 1, c: '#90a4ae', flavor: 'factory',
+    sign: { text: 'MACHINE SHOP B', face: W, bg: '#37474f', fg: '#fff' },
+    doors: [{ face: W, at: -8, width: 2.2, height: 2.5 }], stairs: true, parapet: false });
   for (let i = 0; i < 8; i++) box(18.5 - i, -6, 1.1, 4, 4.5 - 0.55 * i, 'concrete');
   box(19, 12, 0.3, 36, 1.1, 'parapet', 5);
   box(28, -5.85, 18, 0.3, 1.1, 'parapet', 5);
@@ -41,9 +45,13 @@ export function buildNnewi() {
   box(12, -22, 0.4, 0.4, 15, 'pole'); // cable hint
 
   // Office + gate shop
-  box(-30, 30, 14, 10, 7, 'building', 0, { c: '#b0bec5', sign: { text: 'INNOSON PARTS — NNEWI', face: S, bg: '#0d47a1', fg: '#fff' } });
+  enterable({ id: 'innoson', x: -30, z: 30, w: 14, d: 10, h: 7, floors: 2, c: '#b0bec5', flavor: 'office',
+    sign: { text: 'INNOSON PARTS — NNEWI', face: S, bg: '#0d47a1', fg: '#fff' },
+    doors: [{ face: S, at: 2, width: 1.8, height: 2.2 }], stairs: true, parapet: true });
   shop(-16, 30, 6, 4, 'TYRE BAY', S, '#d84315');
-  shop(16, -32, 8, 4, 'ENGINE BLOCKS', N, '#1b5e20', '#ffeb3b', '#cfd8dc');
+  enterable({ id: 'engine-shop', x: 16, z: -32, w: 8, d: 4, h: 3, floors: 1, c: '#cfd8dc', flavor: 'shop',
+    sign: { text: 'ENGINE BLOCKS', face: N, bg: '#1b5e20', fg: '#ffeb3b' },
+    doors: [{ face: N, at: 0, width: 1.7, height: 2.2 }], stairs: false, parapet: false });
   shop(30, -32, 8, 4, 'OIL & FILTERS', N, '#e65100');
 
   // Container stacks (cover + elevation)
@@ -92,6 +100,9 @@ export function buildNnewi() {
   pickup('ammo', 10, -4);
   pickup('ammo', -2, -30);
   pickup('ammo', 12, 24);
+  pickup('med', -28, -10);           // inside machine shop A
+  pickup('ammo', 28, 6);             // inside machine shop B
+  pickup('ammo', -30, 30);           // inside Innoson office
 
   return L.finish();
 }
