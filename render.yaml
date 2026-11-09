@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: frontline-fps
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: BOTS
+        value: "3"
+      - key: WIN_KILLS
+        value: "20"

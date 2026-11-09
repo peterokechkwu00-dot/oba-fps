@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Frontline: Oba — Multiplayer FPS</title>
+<link rel="icon" href="data:," />
+<link rel="stylesheet" href="/style.css" />
+<script type="importmap">{ "imports": { "three": "/vendor/three/three.module.js" } }</script>
+</head>
+<body>
+<div id="game"></div>
+
+<div id="hud" class="hidden">
+  <div id="crosshair"><i class="t"></i><i class="b"></i><i class="l"></i><i class="r"></i></div>
+  <div id="hitmarker"></div>
+  <div id="vignette"></div>
+  <div id="topbar"><span id="mapname"></span><span id="score"></span></div>
+  <div id="killfeed"></div>
+  <div id="centermsg"></div>
+  <div id="health"><div class="label">HP</div><div class="bar"><div id="hpfill"></div></div><div id="hpnum">100</div></div>
+  <div id="ammo"><span id="mag">30</span><span class="sep">/</span><span id="reserve">150</span><div id="reloading" class="hidden">RELOADING…</div></div>
+  <div id="clickhint" class="hidden">Click to play · Esc to release mouse</div>
+  <div id="death" class="hidden"><div class="big">YOU WERE KILLED</div><div id="killedby"></div><div id="respawn"></div></div>
+  <div id="roundend" class="hidden"><div class="big" id="winner"></div><div id="roundtimer"></div></div>
+  <div id="scoreboard" class="hidden"><h2>SCOREBOARD — <span id="sbmap"></span></h2><table><thead><tr><th>Player</th><th>Kills</th><th>Deaths</th><th>K/D</th></tr></thead><tbody id="sbbody"></tbody></table><div class="sbhint">First to <span id="sbwin">20</span> kills wins the round</div></div>
+</div>
+
+<div id="menu">
+  <div class="panel">
+    <h1>FRONTLINE</h1>
+    <div class="subtitle">Online multiplayer FPS · Map: <b id="menumap"></b></div>
+    <input id="name" maxlength="16" placeholder="Enter your callsign" autocomplete="off" />
+    <button id="play">DEPLOY</button>
+    <div id="status"></div>
+    <div class="controls">
+      <div><b>WASD</b> move</div><div><b>Mouse</b> look</div><div><b>Space</b> jump</div><div><b>Shift</b> sprint</div>
+      <div><b>Left click</b> shoot</div><div><b>Right click</b> aim</div><div><b>R</b> reload</div><div><b>Tab</b> scoreboard</div>
+    </div>
+    <div class="tip">Share this page's link with friends so they can join the same match.</div>
+  </div>
+</div>
+<script type="module" src="/main.js"></script>
+</body>
+</html>
