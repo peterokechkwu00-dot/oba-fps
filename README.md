@@ -38,7 +38,7 @@ Other people on your network can join at `http://<your-ip>:3000`.
 | R | Reload (30-round mag, 150 reserve) |
 | Tab (hold) | Scoreboard (+ voice mute buttons) |
 | T or Enter | Text chat (Enter sends, Esc cancels) |
-| V (hold) | Push-to-talk voice chat |
+| V | Mute / unmute your microphone (voice is open-mic by default) |
 | Esc | Release mouse |
 
 ## Communication
@@ -48,9 +48,12 @@ Other people on your network can join at `http://<your-ip>:3000`.
   Join and leave notices also appear in the chat box.
 - **Voice chat**: every player connects directly to every other player (WebRTC peer-to-peer audio). The game
   WebSocket carries the connection setup, and Google's public STUN servers help players find each other.
-  Hold **V** to talk. The browser only asks for microphone permission the first time you press V. Press Esc
-  to open the scoreboard/settings, where you can turn on *Open mic*, set the voice volume, and mute
-  individual players. A 🔊 icon shows next to the name tag and in the scoreboard while someone is talking.
+  Voice is **open-mic by default**: the browser asks for microphone permission right after you click
+  DEPLOY, and from then on everyone can hear you. Press **V** to mute or unmute yourself. An on-screen
+  badge shows your mic status (🎤 on / 🔇 muted / ⚠️ blocked). If you deny the mic, you can still hear
+  everyone else. Voice-activity detection lights the 🔊 icon on name tags and in the scoreboard only while
+  someone is actually speaking. Press Esc to open the scoreboard/settings, where you can turn your mic
+  on or off, set the voice volume, and mute individual players.
 - **Limitation:** there is no TURN server, so players behind strict NATs (some mobile carriers and corporate
   networks) may not hear each other. Add a TURN server (e.g. coturn, or Twilio/Metered) to `ICE_SERVERS` in
   `public/comms.js` to fix this. Voice is not positional, and a mesh works best for about 8 or fewer talkers.

@@ -84,7 +84,7 @@ const handlers = {
     me.id = m.id; me.seq = m.seq; winKills = m.win; roster = m.list; roundOver = m.roundOver;
     me.pos.set(...m.p); me.yaw = m.yaw; me.alive = true; me.hp = MAX_HP;
     joined = true; $('menu').classList.add('hidden'); $('hud').classList.remove('hidden'); $('sbwin').textContent = winKills;
-    updateScore(); comms.chatLine('', `Welcome to ${MAP_NAME}, ${nameOf(me.id)}! Press T to chat, hold V to talk.`, 'sys');
+    updateScore(); comms.chatLine('', `Welcome to ${MAP_NAME}, ${nameOf(me.id)}! Voice chat is open-mic — press V to mute/unmute, T to type.`, 'sys');
     for (const r of roster) if (r.talk) comms.talking.add(r.id);
     comms.connectVoice(m.list);
   },
@@ -181,7 +181,7 @@ $('sbbody').addEventListener('click', e => { const b = e.target.closest('button.
 function showMenu() { $('menu').classList.remove('hidden'); $('hud').classList.add('hidden'); }
 function join() {
   const name = $('name').value.trim() || `Soldier${Math.floor(Math.random() * 900 + 100)}`;
-  localStorage.setItem('fps-name', name); sfx.init(); connect(name); lock();
+  localStorage.setItem('fps-name', name); sfx.init(); connect(name); lock(); comms.startVoice();
 }
 $('play').onclick = join;
 $('name').addEventListener('keydown', e => { if (e.key === 'Enter') join(); });
@@ -209,12 +209,12 @@ addEventListener('mousemove', e => {
 addEventListener('keydown', e => {
   if (comms.isChatting()) return;
   if (joined && (e.code === 'KeyT' || e.code === 'Enter')) { e.preventDefault(); for (const k in keys) keys[k] = false; mouseDown = false; comms.openChat(); return; }
-  if (joined && e.code === 'KeyV') { if (!e.repeat) comms.pttDown(); return; }
+  if (joined && e.code === 'KeyV') { if (!e.repeat) comms.toggleMic(); return; }
   if (e.code === 'Tab') { e.preventDefault(); if (joined) { renderScoreboard(); $('scoreboard').classList.remove('hidden'); } return; }
   keys[e.code] = true;
   if (e.code === 'KeyR') startReload();
 });
-addEventListener('keyup', e => { keys[e.code] = false; if (e.code === 'KeyV') comms.pttUp(); if (e.code === 'Tab' && !roundOver && locked) $('scoreboard').classList.add('hidden'); });
+addEventListener('keyup', e => { keys[e.code] = false; if (e.code === 'Tab' && !roundOver && locked) $('scoreboard').classList.add('hidden'); });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; mouseDown = false; });
 
 // ---------- Physics & collision ----------

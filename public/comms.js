@@ -6,8 +6,9 @@ let net = () => {}, myId = () => null, nameOf = id => `#${id}`, onTalkChange = (
 export const talking = new Set();   // ids currently transmitting (including me)
 export const muted = new Set();
 const peers = new Map();            // id -> { pc, audio, tx, pendingIce: [] }
-let micTrack = null, micRequested = false, micDenied = false, ptt = false;
-let openMic = localStorage.getItem('fps-openmic') === '1';
+let micTrack = null, micRequested = false, micDenied = false;
+let micOn = localStorage.getItem('fps-micmuted') !== '1'; // open mic by default; V toggles
+let vad = { speaking: false, lastLoud: 0, level: 0 };
 let voiceVolume = Number(localStorage.getItem('fps-voicevol') || 1);
 let chatting = false;
 
@@ -20,8 +21,9 @@ export function initComms(opts) {
     else if (e.key === 'Escape') closeChat();
   });
   input.addEventListener('keyup', e => e.stopPropagation());
-  $('openmic').checked = openMic;
-  $('openmic').addEventListener('change', async e => { openMic = e.target.checked; localStorage.setItem('fps-openmic', openMic ? '1' : '0'); if (openMic) await ensureMic(); updateTransmit(); });
+  $('openmic').checked = micOn;
+  $('openmic').addEventListener('change', e => setMic(e.target.checked));
+  renderMicStatus();
   $('voicevol').value = voiceVolume;
   $('voicevol').addEventListener('input', e => { voiceVolume = Number(e.target.value); localStorage.setItem('fps-voicevol', voiceVolume); for (const p of peers.values()) p.audio.volume = voiceVolume; });
 }
@@ -49,25 +51,57 @@ async function ensureMic() {
   micRequested = true;
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
-    micTrack = stream.getAudioTracks()[0]; micTrack.enabled = false;
+    micTrack = stream.getAudioTracks()[0]; micTrack.enabled = micOn;
     for (const p of peers.values()) if (p.tx) p.tx.sender.replaceTrack(micTrack).catch(() => {});
-    chatLine('', 'Microphone ready — hold V to talk.', 'sys');
+    startVAD(stream);
+    chatLine('', micOn ? 'Voice chat is live — your mic is ON. Press V to mute/unmute.' : 'Microphone ready (muted) — press V to unmute.', 'sys');
     return true;
   } catch (e) {
-    micDenied = true; chatLine('', 'Microphone blocked or unavailable — voice chat is listen-only.', 'sys'); return false;
-  } finally { micRequested = false; }
+    micDenied = true;
+    chatLine('', 'Microphone access was denied or no mic was found — you can still hear others. Allow the mic in your browser\'s site settings and reload to talk.', 'sys');
+    return false;
+  } finally { micRequested = false; renderMicStatus(); }
 }
-function updateTransmit() {
-  const on = !!micTrack && (ptt || openMic);
-  if (micTrack) micTrack.enabled = on;
-  const id = myId(); const was = talking.has(id);
-  if (on) talking.add(id); else talking.delete(id);
-  if (was !== on) { net({ t: 'talk', on }); onTalkChange(id, on); }
-  $('talkind').classList.toggle('hidden', !on);
+// Voice-activity detection: the speaking icon only lights up while the mic level is above a threshold.
+function startVAD(stream) {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const src = ctx.createMediaStreamSource(stream); const an = ctx.createAnalyser(); an.fftSize = 512; src.connect(an);
+    const buf = new Float32Array(an.fftSize);
+    setInterval(() => {
+      if (ctx.state === 'suspended') ctx.resume();
+      an.getFloatTimeDomainData(buf); let sum = 0; for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+      const rms = Math.sqrt(sum / buf.length); vad.level = rms; const now = performance.now();
+      if (rms > 0.02) vad.lastLoud = now;
+      setSpeaking(!!micTrack && micOn && now - vad.lastLoud < 350);
+    }, 80);
+  } catch (e) { console.warn('VAD unavailable', e); }
 }
-export async function pttDown() { if (ptt) return; ptt = true; await ensureMic(); updateTransmit(); }
-export function pttUp() { ptt = false; updateTransmit(); }
-
+function setSpeaking(on) {
+  if (on === vad.speaking) return; vad.speaking = on;
+  const id = myId(); if (on) talking.add(id); else talking.delete(id);
+  net({ t: 'talk', on }); onTalkChange(id, on); renderMicStatus();
+}
+function renderMicStatus() {
+  const el = $('micstatus'); if (!el) return;
+  let txt, cls;
+  if (micDenied) { txt = '⚠️ Mic blocked — others can\'t hear you'; cls = 'denied'; }
+  else if (!micTrack) { txt = micRequested ? '🎤 Requesting microphone…' : '🎤 Mic off'; cls = 'off'; }
+  else if (!micOn) { txt = '🔇 Mic muted (press V)'; cls = 'muted'; }
+  else { txt = vad.speaking ? '🎤 Mic on · speaking' : '🎤 Mic on (V to mute)'; cls = vad.speaking ? 'live speaking' : 'live'; }
+  el.textContent = txt; el.className = cls;
+  const cb = $('openmic'); if (cb) cb.checked = micOn;
+}
+export function setMic(on) {
+  micOn = !!on; localStorage.setItem('fps-micmuted', micOn ? '0' : '1');
+  if (micTrack) micTrack.enabled = micOn;
+  if (!micOn) setSpeaking(false);
+  renderMicStatus();
+}
+export function toggleMic() { if (!micTrack && !micDenied) { micOn = true; ensureMic(); renderMicStatus(); return; } setMic(!micOn); }
+// Called right after the player clicks Play: ask for the mic straight away (open mic by default).
+export function startVoice() { renderMicStatus(); return ensureMic(); }
+export const micState = () => ({ hasMic: !!micTrack, micOn, denied: micDenied, speaking: vad.speaking, level: vad.level });
 function getPeer(id, initiator) {
   let peer = peers.get(id); if (peer) return peer;
   const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
