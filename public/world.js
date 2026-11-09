@@ -2,17 +2,30 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { getMap, DEFAULT_MAP } from './shared/map.js';
+import { PRESETS } from './graphics.js';
 
 let maxAniso = 4;
+let quality = PRESETS.medium;
 const texCache = new Map();
 
+export function setWorldQuality(preset) {
+  quality = preset || PRESETS.medium;
+  texCache.clear();
+  matCache.clear();
+}
+
 function canvasTex(w, h, draw, key) {
-  if (key && texCache.has(key)) return texCache.get(key);
+  const scale = quality.texScale || 1;
+  w = Math.max(32, Math.round(w * scale));
+  h = Math.max(32, Math.round(h * scale));
+  const ck = key ? `${key}@${w}x${h}` : null;
+  if (ck && texCache.has(ck)) return texCache.get(ck);
   const c = document.createElement('canvas'); c.width = w; c.height = h;
   const g = c.getContext('2d'); draw(g, w, h);
   const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = maxAniso;
-  if (key) texCache.set(key, t);
+  t.colorSpace = THREE.SRGBColorSpace; t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.anisotropy = Math.min(maxAniso, quality.aniso || 1);
+  if (ck) texCache.set(ck, t);
   return t;
 }
 const rnd = (a, b) => a + Math.random() * (b - a);
@@ -164,7 +177,7 @@ const T = {
 };
 
 export function signTexture(text, sub, bg, fg, aspect) {
-  const W = 1024, H = Math.max(96, Math.min(512, Math.round(W / aspect)));
+  const W = quality.texScale < 0.7 ? 512 : quality.texScale < 0.9 ? 768 : 1024, H = Math.max(96, Math.min(512, Math.round(W / aspect)));
   return canvasTex(W, H, (g, w, h) => {
     g.fillStyle = bg; g.fillRect(0, 0, w, h);
     g.strokeStyle = fg; g.globalAlpha = 0.85; g.lineWidth = Math.max(4, h * 0.05); g.strokeRect(g.lineWidth, g.lineWidth, w - 2 * g.lineWidth, h - 2 * g.lineWidth); g.globalAlpha = 1;
@@ -202,12 +215,44 @@ function addMesh(scene, geo, material, x, y, z, cast = true, receive = true) {
   const m = new THREE.Mesh(geo, material); m.position.set(x, y, z); m.castShadow = cast; m.receiveShadow = receive; scene.add(m); return m;
 }
 
-function queueMesh(store, geo, material, x, y, z, cast = true, receive = true) {
+function queueMesh(store, geo, material, x, y, z, cast = true, receive = true, euler = null) {
   const g = geo.clone();
+  if (euler) {
+    if (euler.x) g.rotateX(euler.x);
+    if (euler.y) g.rotateY(euler.y);
+    if (euler.z) g.rotateZ(euler.z);
+  }
   g.translate(x, y, z);
   const key = material.uuid + (cast ? 'c' : '') + (receive ? 'r' : '');
   if (!store.has(key)) store.set(key, { material, geos: [], cast, receive });
   store.get(key).geos.push(g);
+}
+
+function mergeByMaterial(group) {
+  const buckets = new Map();
+  for (const ch of [...group.children]) {
+    if (!ch.isMesh || !ch.geometry || Array.isArray(ch.material)) continue;
+    ch.updateMatrix();
+    const g = ch.geometry.clone();
+    g.applyMatrix4(ch.matrix);
+    const key = ch.material.uuid + (ch.castShadow ? 'c' : '') + (ch.receiveShadow ? 'r' : '');
+    if (!buckets.has(key)) buckets.set(key, { material: ch.material, geos: [], cast: ch.castShadow, receive: ch.receiveShadow });
+    buckets.get(key).geos.push(g);
+    group.remove(ch);
+  }
+  for (const b of buckets.values()) {
+    const merged = mergeGeometries(b.geos, false);
+    for (const g of b.geos) g.dispose();
+    if (!merged) continue;
+    const m = new THREE.Mesh(merged, b.material);
+    m.castShadow = b.cast; m.receiveShadow = b.receive;
+    group.add(m);
+  }
+}
+
+export function freezeStatic(root) {
+  root.updateMatrixWorld(true);
+  root.traverse(o => { if (!o.isLight) o.matrixAutoUpdate = false; });
 }
 
 function flushQueued(root, store, colliders) {
@@ -246,6 +291,7 @@ export function buildCar(rot, color = '#c62828') {
   for (const [x, z] of [[-0.85, -1.25], [0.85, -1.25], [-0.85, 1.25], [0.85, 1.25]]) {
     const w = new THREE.Mesh(wheelGeo, black); w.rotation.z = Math.PI / 2; w.position.set(x, 0.32, z); w.castShadow = true; g.add(w);
   }
+  mergeByMaterial(g);
   g.rotation.y = rot ? Math.PI / 2 : 0;
   return g;
 }
@@ -267,6 +313,7 @@ export function buildKeke(rot) {
   for (const [geo, m, x, y, z] of parts) { const me = new THREE.Mesh(geo, m); me.position.set(x, y, z); me.castShadow = true; g.add(me); }
   const wheelGeo = new THREE.CylinderGeometry(0.26, 0.26, 0.16, 14);
   for (const [x, z] of [[0, -1.0], [-0.62, 0.75], [0.62, 0.75]]) { const w = new THREE.Mesh(wheelGeo, black); w.rotation.z = Math.PI / 2; w.position.set(x, 0.26, z); w.castShadow = true; g.add(w); }
+  mergeByMaterial(g);
   g.rotation.y = rot ? Math.PI / 2 : 0;
   return g;
 }
@@ -284,6 +331,7 @@ export function buildDanfo(rot) {
   for (const [x, z] of [[-1.0, -1.8], [1.0, -1.8], [-1.0, 1.8], [1.0, 1.8]]) { const w = new THREE.Mesh(wheelGeo, black); w.rotation.z = Math.PI / 2; w.position.set(x, 0.4, z); g.add(w); }
   const bumper = new THREE.Mesh(new THREE.BoxGeometry(2.25, 0.25, 0.15), mat(null, { color: '#555' })); bumper.position.set(0, 0.5, -2.8); g.add(bumper);
   const rack = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.12, 3.5), mat(null, { color: '#333' })); rack.position.set(0, 2.5, 0.4); g.add(rack);
+  mergeByMaterial(g);
   g.rotation.y = rot ? Math.PI / 2 : 0;
   return g;
 }
@@ -301,6 +349,7 @@ export function buildTruck(rot, color = '#3e4a2c') {
   for (const [x, z] of [[-1.05, -2.0], [1.05, -2.0], [-1.05, 0.4], [1.05, 0.4], [-1.05, 2.4], [1.05, 2.4]]) {
     const w = new THREE.Mesh(wheelGeo, black); w.rotation.z = Math.PI / 2; w.position.set(x, 0.42, z); w.castShadow = true; g.add(w);
   }
+  mergeByMaterial(g);
   g.rotation.y = rot ? Math.PI / 2 : 0;
   return g;
 }
@@ -338,9 +387,10 @@ export function clearWorld(scene) {
 
 export function buildWorld(scene, renderer, opts = {}) {
   const map = opts.map || getMap(DEFAULT_MAP);
-  const low = !!opts.low;
+  if (opts.quality) quality = opts.quality;
+  const low = !!opts.low || quality === PRESETS.low;
   const { BOXES, ROADS, DIRT, PALMS, UMBRELLAS, BILLBOARDS, CANOPIES, RIVERS, ARENA_HALF, theme } = map;
-  maxAniso = renderer.capabilities.getMaxAnisotropy();
+  maxAniso = Math.min(renderer.capabilities.getMaxAnisotropy(), quality.aniso || 8);
   clearWorld(scene);
   const root = new THREE.Group(); root.name = '__world'; scene.add(root);
   const colliders = [];
@@ -350,13 +400,16 @@ export function buildWorld(scene, renderer, opts = {}) {
   const sky = (theme && theme.sky) || '#9ccbe8';
   const fog = (theme && theme.fog) || '#cfe2ea';
   scene.background = new THREE.Color(sky);
-  scene.fog = new THREE.Fog(fog, 45, 150);
+  scene.fog = new THREE.Fog(fog, quality.fogNear, quality.fogFar);
   root.add(new THREE.HemisphereLight('#cfe8ff', '#a0643a', 1.1));
   const sun = new THREE.DirectionalLight('#fff0d0', 2.4);
-  sun.position.set(30, 55, 20); sun.castShadow = true;
-  sun.shadow.mapSize.set(low ? 1024 : 2048, low ? 1024 : 2048);
-  Object.assign(sun.shadow.camera, { left: -50, right: 50, top: 50, bottom: -50, near: 1, far: 140 });
-  sun.shadow.bias = -0.0008; sun.shadow.normalBias = 0.03;
+  sun.position.set(30, 55, 20);
+  sun.castShadow = !!quality.shadows;
+  if (quality.shadows) {
+    sun.shadow.mapSize.set(quality.shadowSize || 2048, quality.shadowSize || 2048);
+    Object.assign(sun.shadow.camera, { left: -50, right: 50, top: 50, bottom: -50, near: 1, far: 140 });
+    sun.shadow.bias = -0.0008; sun.shadow.normalBias = 0.03;
+  }
   root.add(sun); root.add(sun.target);
 
   const gt = (theme && theme.ground === 'concrete') ? T.yard() : T.ground();
@@ -383,7 +436,7 @@ export function buildWorld(scene, renderer, opts = {}) {
     const kerbMat = mat(T.stripes('#e0e0e0', '#222', 8, true));
     for (const side of [-1, 1]) {
       const kg = boxGeo(alongZ ? 0.25 : len, 0.15, alongZ ? len : 0.25, 2, 1);
-      addMesh(root, kg, kerbMat, r.x + (alongZ ? side * (wid / 2 + 0.12) : 0), 0.075, r.z + (alongZ ? 0 : side * (wid / 2 + 0.12)), false, true);
+      queueMesh(solidBatches, kg, kerbMat, r.x + (alongZ ? side * (wid / 2 + 0.12) : 0), 0.075, r.z + (alongZ ? 0 : side * (wid / 2 + 0.12)), false, true);
     }
   }
 
@@ -397,24 +450,44 @@ export function buildWorld(scene, renderer, opts = {}) {
     const cx = b.x, cy = b.y + b.h / 2, cz = b.z;
     let mesh = null;
     switch (b.k) {
-      case 'wall': mesh = addMesh(root, boxGeo(b.w, b.h, b.d, 4, 5), [mat(T.wall()), mat(T.wall()), concreteMat, concreteMat, mat(T.wall()), mat(T.wall())], cx, cy, cz); break;
-      case 'concrete': mesh = addMesh(root, boxGeo(b.w, b.h, b.d, 2), concreteMat, cx, cy, cz); break;
+      case 'wall':
+        queueMesh(solidBatches, boxGeo(b.w, b.h, b.d, 4, 5), mat(T.wall()), cx, cy, cz);
+        break;
+      case 'concrete':
+        queueMesh(solidBatches, boxGeo(b.w, b.h, b.d, 2), concreteMat, cx, cy, cz);
+        break;
       case 'monument': mesh = addMesh(root, boxGeo(b.w, b.h, b.d, b.w, b.h), [mat(T.naija()), mat(T.naija()), concreteMat, concreteMat, mat(T.naija()), mat(T.naija())], cx, cy, cz); break;
-      case 'crate': mesh = addMesh(root, boxGeo(b.w, b.h, b.d, b.w, b.h), mat(T.crate()), cx, cy, cz); break;
+      case 'crate':
+        queueMesh(solidBatches, boxGeo(b.w, b.h, b.d, b.w, b.h), mat(T.crate()), cx, cy, cz);
+        break;
       case 'stall': {
-        mesh = addMesh(root, boxGeo(b.w, b.h, b.d, 1.3), mat(T.wood()), cx, cy, cz);
-        const goodsCols = ['#e53935', '#fdd835', '#43a047', '#fb8c00', '#6d4c41'];
-        for (let i = 0; i < 6; i++) addMesh(root, new THREE.SphereGeometry(rnd(0.1, 0.18), 6, 5), mat(null, { color: goodsCols[i % 5] }), cx + rnd(-1.1, 1.1), b.y + b.h + 0.1, cz + rnd(-0.5, 0.5), false, false);
+        queueMesh(solidBatches, boxGeo(b.w, b.h, b.d, 1.3), mat(T.wood()), cx, cy, cz);
+        if (quality.stallGoods) {
+          const goodsCols = ['#e53935', '#fdd835', '#43a047', '#fb8c00', '#6d4c41'];
+          for (let i = 0; i < 6; i++) addMesh(root, new THREE.SphereGeometry(rnd(0.1, 0.18), 6, 5), mat(null, { color: goodsCols[i % 5] }), cx + rnd(-1.1, 1.1), b.y + b.h + 0.1, cz + rnd(-0.5, 0.5), false, false);
+        }
         break;
       }
-      case 'fence': mesh = addMesh(root, boxGeo(b.w, b.h, b.d, 2, 2), mat(T.zinc(1)), cx, cy, cz); break;
-      case 'parapet': mesh = addMesh(root, boxGeo(b.w, b.h, b.d, 2), mat(T.painted('#d7ccc8')), cx, cy, cz); break;
-      case 'pole': mesh = addMesh(root, boxGeo(b.w, b.h, b.d), mat(null, { color: '#444' }), cx, cy, cz); break;
+      case 'fence':
+        queueMesh(solidBatches, boxGeo(b.w, b.h, b.d, 2, 2), mat(T.zinc(1)), cx, cy, cz);
+        break;
+      case 'parapet':
+        queueMesh(solidBatches, boxGeo(b.w, b.h, b.d, 2), mat(T.painted('#d7ccc8')), cx, cy, cz);
+        break;
+      case 'pole':
+        queueMesh(solidBatches, boxGeo(b.w, b.h, b.d), mat(null, { color: '#444' }), cx, cy, cz);
+        break;
       case 'pillar': mesh = addMesh(root, boxGeo(b.w, b.h, b.d, 1, 1), mat(T.stripes('#ffffff', '#c62828', 8)), cx, cy, cz); break;
       case 'pump': mesh = addMesh(root, boxGeo(b.w, b.h, b.d, b.w, b.h), mat(T.stripes('#c62828', '#fafafa', 3)), cx, cy, cz); break;
-      case 'metal': mesh = addMesh(root, boxGeo(b.w, b.h, b.d, 2), metalMat, cx, cy, cz); break;
-      case 'sandbag': mesh = addMesh(root, boxGeo(b.w, b.h, b.d, 1, 0.5), mat(T.sandbag()), cx, cy, cz); break;
-      case 'bunker': mesh = addMesh(root, boxGeo(b.w, b.h, b.d, 2), mat(T.painted('#5d6456')), cx, cy, cz); break;
+      case 'metal':
+        queueMesh(solidBatches, boxGeo(b.w, b.h, b.d, 2), metalMat, cx, cy, cz);
+        break;
+      case 'sandbag':
+        queueMesh(solidBatches, boxGeo(b.w, b.h, b.d, 1, 0.5), mat(T.sandbag()), cx, cy, cz);
+        break;
+      case 'bunker':
+        queueMesh(solidBatches, boxGeo(b.w, b.h, b.d, 2), mat(T.painted('#5d6456')), cx, cy, cz);
+        break;
       case 'container': {
         const col = b.c || '#c62828';
         mesh = addMesh(root, boxGeo(b.w, b.h, b.d, b.w, b.h), mat(T.container(col)), cx, cy, cz);
@@ -435,9 +508,8 @@ export function buildWorld(scene, renderer, opts = {}) {
         break;
       }
       case 'building': {
-        const wallMat = mat(T.building(b.c));
-        mesh = addMesh(root, boxGeo(b.w, b.h, b.d, 4, 3), [wallMat, wallMat, roofMat, roofMat, wallMat, wallMat], cx, cy, cz);
-        if (b.h >= 6) { const tank = addMesh(root, new THREE.CylinderGeometry(0.7, 0.7, 1.4, 12), mat(null, { color: '#263238' }), cx + b.w / 4, b.y + b.h + 0.7, cz - b.d / 4); tank.castShadow = true; }
+        queueMesh(solidBatches, boxGeo(b.w, b.h, b.d, 4, 3), mat(T.building(b.c)), cx, cy, cz);
+        if (b.h >= 6) addMesh(root, new THREE.CylinderGeometry(0.7, 0.7, 1.4, 12), mat(null, { color: '#263238' }), cx + b.w / 4, b.y + b.h + 0.7, cz - b.d / 4);
         break;
       }
       case 'keke': { const m = buildKeke(b.rot); m.position.set(b.x, b.y, b.z); root.add(m); mesh = addMesh(root, new THREE.BoxGeometry(b.w, b.h, b.d), invisible, cx, cy, cz, false, false); break; }
@@ -459,10 +531,8 @@ export function buildWorld(scene, renderer, opts = {}) {
       case 'table':
       case 'counter':
       case 'pew':
-        mesh = addMesh(root, boxGeo(b.w, b.h, b.d, b.w, b.h), mat(T.wood()), cx, cy, cz);
-        break;
       case 'shelf':
-        mesh = addMesh(root, boxGeo(b.w, b.h, b.d, 1, 1), mat(T.wood()), cx, cy, cz);
+        queueMesh(solidBatches, boxGeo(b.w, b.h, b.d, b.w || 1, b.h || 1), mat(T.wood()), cx, cy, cz);
         break;
       case 'facade':
         if (b.tank) addMesh(root, new THREE.CylinderGeometry(0.7, 0.7, 1.4, 12), mat(null, { color: '#263238' }), cx + b.w / 4, b.y + b.h + 0.7, cz - b.d / 4);
@@ -483,41 +553,123 @@ export function buildWorld(scene, renderer, opts = {}) {
 
   const lights = map.LIGHTS || [];
   const bulbMat = new THREE.MeshBasicMaterial({ color: '#ffe0a0' });
-  const cap = low ? 0 : 8;
+  const cap = quality.lights;
+  const bulbGeos = [];
   lights.forEach((l, i) => {
-    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 8), bulbMat);
-    bulb.position.set(l.x, l.y, l.z); root.add(bulb);
+    const bg = new THREE.SphereGeometry(0.08, 6, 6);
+    bg.translate(l.x, l.y, l.z);
+    bulbGeos.push(bg);
     if (i < cap) {
       const pt = new THREE.PointLight(l.color || '#ffd9a0', l.intensity || 1.8, l.distance || 10, 2);
       pt.position.set(l.x, l.y, l.z); pt.castShadow = false; root.add(pt);
     }
   });
+  if (bulbGeos.length) {
+    const merged = mergeGeometries(bulbGeos, false);
+    if (merged) root.add(new THREE.Mesh(merged, bulbMat));
+    for (const g of bulbGeos) g.dispose();
+  }
 
   for (const sign of BILLBOARDS) {
     const tex = signTexture(sign.text, sign.sub, sign.bg, sign.fg, sign.w / sign.h);
     const m = new THREE.Mesh(new THREE.BoxGeometry(sign.w, sign.h, 0.12), [mat(null, { color: '#333' }), mat(null, { color: '#333' }), mat(null, { color: '#333' }), mat(null, { color: '#333' }), mat(tex), mat(tex)]);
     m.position.set(sign.x, sign.y + sign.h / 2, sign.z); m.rotation.y = sign.rot || 0; m.castShadow = true; root.add(m);
   }
+  const umbPoles = new Map(), umbCones = new Map();
+  const poleMat = mat(null, { color: '#ddd' });
   for (const u of UMBRELLAS) {
-    addMesh(root, new THREE.CylinderGeometry(0.035, 0.035, 2.4, 6), mat(null, { color: '#ddd' }), u.x, 1.2, u.z, false, false);
-    const c = addMesh(root, new THREE.ConeGeometry(1.7, 0.55, 8, 1, true), new THREE.MeshLambertMaterial({ map: T.stripes(u.c1, u.c2, 8, true), side: THREE.DoubleSide }), u.x, 2.55, u.z, true, false);
-    c.rotation.y = Math.random();
+    queueMesh(umbPoles, new THREE.CylinderGeometry(0.035, 0.035, 2.4, 6), poleMat, u.x, 1.2, u.z, false, false);
+    const cmat = new THREE.MeshLambertMaterial({ map: T.stripes(u.c1, u.c2, 8, true), side: THREE.DoubleSide });
+    queueMesh(umbCones, new THREE.ConeGeometry(1.7, 0.55, 8, 1, true), cmat, u.x, 2.55, u.z, true, false, { y: Math.random() * Math.PI });
   }
+  flushQueued(root, umbPoles, null);
+  flushQueued(root, umbCones, null);
   for (const c of CANOPIES) {
     const m = addMesh(root, boxGeo(c.w, 0.6, c.d, 2, 0.6), [mat(T.stripes(c.c, '#fff', 3)), mat(T.stripes(c.c, '#fff', 3)), mat(null, { color: '#ddd' }), mat(null, { color: '#f5f5f5' }), mat(T.stripes(c.c, '#fff', 3)), mat(T.stripes(c.c, '#fff', 3))], c.x, c.y + 0.3, c.z);
     m.castShadow = true;
   }
-  for (const p of PALMS) { const m = buildPalm(p.h); m.position.set(p.x, 0, p.z); root.add(m); }
+  addPalms(root, PALMS, quality.palms);
+  if (quality.farPalms) {
+    const extras = [];
+    for (let i = 0; i < quality.farProps; i++) {
+      if (i % 3) continue;
+      const ang = (i / Math.max(1, quality.farProps)) * Math.PI * 2, r = rnd(52, 70);
+      if (RIVERS && RIVERS.length && Math.cos(ang) < -0.7) continue;
+      extras.push({ x: Math.cos(ang + 0.07) * (r - 5), z: Math.sin(ang + 0.07) * (r - 5), h: rnd(9, 12) });
+    }
+    addPalms(root, extras, quality.palms);
+  }
 
   const farMat = mat(null, { color: '#9aa7ad' });
-  for (let i = 0; i < 40; i++) {
-    const ang = (i / 40) * Math.PI * 2, r = rnd(52, 70), hh = rnd(4, 14);
-    // leave a gap on the west for the Niger backdrop
+  const farN = quality.farProps;
+  const dummy = new THREE.Object3D();
+  const farMesh = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), farMat, farN);
+  let wrote = 0;
+  for (let i = 0; i < farN; i++) {
+    const ang = (i / Math.max(1, farN)) * Math.PI * 2, r = rnd(52, 70), hh = rnd(4, 14);
     if (RIVERS && RIVERS.length && Math.cos(ang) < -0.7) continue;
-    addMesh(root, new THREE.BoxGeometry(rnd(4, 10), hh, rnd(4, 10)), farMat, Math.cos(ang) * r, hh / 2, Math.sin(ang) * r, false, false);
-    if (i % 3 === 0) { const pal = buildPalm(rnd(9, 12)); pal.position.set(Math.cos(ang + 0.07) * (r - 5), 0, Math.sin(ang + 0.07) * (r - 5)); root.add(pal); }
+    dummy.position.set(Math.cos(ang) * r, hh / 2, Math.sin(ang) * r);
+    dummy.scale.set(rnd(4, 10), hh, rnd(4, 10));
+    dummy.updateMatrix();
+    farMesh.setMatrixAt(wrote++, dummy.matrix);
   }
+  farMesh.count = wrote;
+  farMesh.instanceMatrix.needsUpdate = true;
+  farMesh.frustumCulled = false;
+  farMesh.castShadow = false;
+  farMesh.receiveShadow = false;
+  root.add(farMesh);
+
+  freezeStatic(root);
   return { colliders, root, map };
+}
+
+function addPalms(root, palms, mode) {
+  if (!palms || !palms.length) return;
+  const trunkMat = mat(T.palmTrunk());
+  const frondMat = new THREE.MeshLambertMaterial({ map: T.frond(), transparent: true, alphaTest: 0.4, side: THREE.DoubleSide });
+  const trunks = new Map(), fronds = new Map();
+  for (const p of palms) {
+    const h = p.h, x = p.x, z = p.z;
+    if (mode === 'simple') {
+      queueMesh(trunks, new THREE.CylinderGeometry(0.16, 0.26, h, 6), trunkMat, x, h / 2, z, true, false);
+      const leaf = new THREE.PlaneGeometry(1.2, 3.2);
+      leaf.translate(0, 1.6, 0);
+      for (let i = 0; i < 4; i++) {
+        const g = leaf.clone();
+        g.rotateX(-(Math.PI / 2 + 0.15));
+        g.rotateY((i / 4) * Math.PI * 2);
+        g.translate(x, h, z);
+        const key = frondMat.uuid + 'c';
+        if (!fronds.has(key)) fronds.set(key, { material: frondMat, geos: [], cast: true, receive: false });
+        fronds.get(key).geos.push(g);
+      }
+      continue;
+    }
+    const segs = mode === 'reduced' ? 3 : 5;
+    const nFronds = mode === 'reduced' ? 6 : 9;
+    const lean = rnd(-0.25, 0.25), leanZ = rnd(-0.25, 0.25);
+    let px = 0, pz = 0;
+    for (let i = 0; i < segs; i++) {
+      const sh = h / segs; const r0 = 0.28 - i * 0.025, r1 = r0 - 0.025;
+      const nx = px + lean * (i / segs) * 0.6, nz = pz + leanZ * (i / segs) * 0.6;
+      queueMesh(trunks, new THREE.CylinderGeometry(r1, r0, sh, 8), trunkMat, x + nx, sh * (i + 0.5), z + nz, true, false);
+      px = nx; pz = nz;
+    }
+    const leaf = new THREE.PlaneGeometry(1.2, 3.6);
+    leaf.translate(0, 1.8, 0);
+    for (let i = 0; i < nFronds; i++) {
+      const g = leaf.clone();
+      g.rotateX(-(Math.PI / 2 + rnd(-0.55, 0.35)));
+      g.rotateY((i / nFronds) * Math.PI * 2 + rnd(-0.2, 0.2));
+      g.translate(x + px, h, z + pz);
+      const key = frondMat.uuid + 'c';
+      if (!fronds.has(key)) fronds.set(key, { material: frondMat, geos: [], cast: true, receive: false });
+      fronds.get(key).geos.push(g);
+    }
+  }
+  flushQueued(root, trunks, null);
+  flushQueued(root, fronds, null);
 }
 
 // Position an object flat against a box face (offset metres out from the face, at height y above box bottom).

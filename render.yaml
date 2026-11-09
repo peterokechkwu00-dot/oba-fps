@@ -11,6 +11,6 @@ services:
       - key: NODE_VERSION
         value: "20"
       - key: BOTS
-        value: "3"
+        value: "2"
       - key: WIN_KILLS
         value: "20"

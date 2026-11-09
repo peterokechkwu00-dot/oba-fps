@@ -4,9 +4,12 @@ import {
   DEFAULT_MAP, getMap, PLAYER_RADIUS as R, PLAYER_HEIGHT as H, EYE_HEIGHT, MAX_HP,
   FIRE_INTERVAL, MAG_SIZE, RESERVE_AMMO, RELOAD_MS, RESPAWN_MS,
 } from './shared/map.js';
-import { buildWorld } from './world.js';
+import { buildWorld, setWorldQuality } from './world.js';
 import { createPickupField } from './pickups.js';
 import { Soldier, preloadSoldiers, setSoldierQuality } from './avatar.js';
+import { loadQuality, saveQuality } from './graphics.js';
+import { queryAABBs } from './shared/grid.js';
+import { applySnapshot } from './shared/netsnap.js';
 import { initAccount, currentLoadout } from './account.js';
 import { getItem } from './shared/catalog.js';
 import * as sfx from './audio.js';
@@ -22,18 +25,27 @@ const params = new URLSearchParams(location.search);
 $('name').value = localStorage.getItem('fps-name') || '';
 
 // ---------- Renderer / scene ----------
-const renderer = new THREE.WebGLRenderer({ antialias: !isTouch, powerPreference: isTouch ? 'high-performance' : 'default', preserveDrawingBuffer: params.has('autojoin') });
-renderer.setPixelRatio(Math.min(devicePixelRatio, isTouch ? 1.5 : 2));
+const qualityState = loadQuality();
+const renderer = new THREE.WebGLRenderer({ antialias: qualityState.preset.antialias && !isTouch, powerPreference: isTouch ? 'high-performance' : 'default', preserveDrawingBuffer: params.has('autojoin') });
+renderer.setPixelRatio(Math.min(devicePixelRatio, qualityState.preset.pixelRatio));
 renderer.setSize(innerWidth, innerHeight);
 renderer.autoClear = false;
-renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-setSoldierQuality(isTouch); preloadSoldiers();
+renderer.shadowMap.enabled = !!qualityState.preset.shadows;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+setSoldierQuality(qualityState.resolved === 'low');
+setWorldQuality(qualityState.preset);
+preloadSoldiers();
 $('game').appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 const BASE_FOV = 75, ADS_FOV = 50;
-const camera = new THREE.PerspectiveCamera(BASE_FOV, innerWidth / innerHeight, 0.05, 400);
+const camera = new THREE.PerspectiveCamera(BASE_FOV, innerWidth / innerHeight, 0.05, qualityState.preset.far);
 camera.rotation.order = 'YXZ';
 scene.add(camera);
+const netStore = { ps: new Map(), vs: new Map() };
+let lastPickups = null, lastVehicles = null;
+let pingMs = 0, pingSentAt = 0;
+let fpsFrames = 0, fpsStamp = 0, fpsVal = 0;
+let lastDrive = { th: 0, st: 0, br: false };
 
 let currentMap = getMap(DEFAULT_MAP);
 let AABBS = currentMap.AABBS;
@@ -49,22 +61,55 @@ function loadClientMap(id, pickupList, vehicleList) {
   AABBS = currentMap.AABBS;
   ARENA_HALF = currentMap.ARENA_HALF;
   setMapName(currentMap.name);
-  const built = buildWorld(scene, renderer, { low: isTouch, map: currentMap });
+  lastPickups = pickupList || lastPickups;
+  lastVehicles = vehicleList || lastVehicles;
+  const built = buildWorld(scene, renderer, { low: qualityState.resolved === 'low', quality: qualityState.preset, map: currentMap });
   colliders = built.colliders;
   pickupField?.dispose();
-  pickupField = createPickupField(scene, pickupList || currentMap.PICKUPS.map((p, i) => ({ ...p, id: i, up: true })));
+  pickupField = createPickupField(scene, lastPickups || currentMap.PICKUPS.map((p, i) => ({ ...p, id: i, up: true })));
   vehicleField?.dispose();
   vehicleField = createVehicleField(scene);
-  const rows = vehicleList || vehicleSpawns(currentMap.id).map((sp, i) => packVehicle(createVehicle(i + 1, sp)));
-  vehicleField.sync(rows);
+  const rows = lastVehicles || vehicleSpawns(currentMap.id).map((sp, i) => packVehicle(createVehicle(i + 1, sp)));
+  vehicleField.sync(rows, { full: true });
 }
+function syncGfxSelects() {
+  for (const id of ['gfx', 'gfx2']) {
+    const el = $(id); if (el) el.value = qualityState.mode;
+  }
+}
+function applyQuality(mode) {
+  const next = saveQuality(mode);
+  qualityState.mode = next.mode;
+  qualityState.resolved = next.resolved;
+  qualityState.preset = next.preset;
+  setWorldQuality(next.preset);
+  setSoldierQuality(next.resolved === 'low');
+  renderer.setPixelRatio(Math.min(devicePixelRatio, next.preset.pixelRatio));
+  renderer.shadowMap.enabled = !!next.preset.shadows;
+  camera.far = next.preset.far;
+  camera.updateProjectionMatrix();
+  syncGfxSelects();
+  const keepVeh = (vehicleField?.all() || []).map(r => {
+    const st = r.last || r.render;
+    if (!st) return null;
+    return packVehicle({ ...st, seats: st.seats || [] });
+  }).filter(Boolean);
+  loadClientMap(currentMap.id, lastPickups, keepVeh.length ? keepVeh : lastVehicles);
+}
+function bindGfxSelect(id) {
+  const el = $(id); if (!el) return;
+  el.value = qualityState.mode;
+  el.onchange = () => applyQuality(el.value);
+}
+bindGfxSelect('gfx');
+bindGfxSelect('gfx2');
 loadClientMap(DEFAULT_MAP);
 addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); weaponCamera.aspect = camera.aspect; weaponCamera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
 
 // ---------- First-person weapon (own scene + camera so it never clips into walls) ----------
 const weaponScene = new THREE.Scene();
 const weaponCamera = new THREE.PerspectiveCamera(54, innerWidth / innerHeight, 0.01, 5);
-{
+if (qualityState.preset.env) {
   const pm = new THREE.PMREMGenerator(renderer);
   const env = pm.fromScene(new RoomEnvironment(), 0.04).texture;
   weaponScene.environment = env; weaponScene.environmentIntensity = 0.55;
@@ -121,6 +166,7 @@ const handlers = {
     me.pos.set(...m.p); me.yaw = m.yaw; me.alive = true; me.hp = MAX_HP;
     me.armour = m.armour || 0; if (m.reserve != null) me.reserve = m.reserve; if (m.ammo != null) me.ammo = m.ammo;
     if (m.map) loadClientMap(m.map.id, m.pickups, m.vehicles);
+    else if (m.vehicles) { lastVehicles = m.vehicles; vehicleField?.sync(m.vehicles, { full: true }); }
     joined = true; $('menu').classList.add('hidden'); $('hud').classList.remove('hidden'); $('sbwin').textContent = winKills;
     updateScore(); comms.chatLine('', `Welcome to ${currentMap.name}, ${nameOf(me.id)}! ` + (isTouch ? 'Voice is open-mic — tap 🎤 to mute, CHAT to type.' : 'Voice chat is open-mic — press V to mute/unmute, T to type.'), 'sys');
     for (const r of roster) if (r.talk) comms.talking.add(r.id);
@@ -130,8 +176,9 @@ const handlers = {
   },
   roster(m) { roster = m.list; winKills = m.win; for (const r of roster) { const rem = remotes.get(r.id); if (rem) { rem.s.setName(r.name); applyRemoteCosmetics(rem.s, r); } } updateScore(); renderScoreboard(); },
   s(m) {
+    applySnapshot(netStore, m);
     const now = performance.now(), seen = new Set();
-    for (const row of m.ps) {
+    for (const row of netStore.ps.values()) {
       const [id, x, y, z, yaw, pitch, hp, armourOrAlive, maybeAlive] = row;
       const armour = maybeAlive === undefined ? 0 : armourOrAlive;
       const alive = maybeAlive === undefined ? armourOrAlive : maybeAlive;
@@ -141,7 +188,7 @@ const handlers = {
       if (!r) {
         const info = roster.find(p => p.id === id) || {};
         const tint = getItem(info.camo)?.color || info.c;
-        r = { s: new Soldier(id, info.name || `#${id}`, tint), buf: [], speed: 0, last: new THREE.Vector3(x, y, z) };
+        r = { s: new Soldier(id, info.name || `#${id}`, tint), buf: [], speed: 0, speedX: 0, speedZ: 0, last: new THREE.Vector3(x, y, z) };
         scene.add(r.s.root); remotes.set(id, r); r.s.root.position.set(x, y, z); r.s.setSpeaking(comms.talking.has(id));
         applyRemoteCosmetics(r.s, info);
       }
@@ -149,9 +196,12 @@ const handlers = {
       if (r.buf.length > 40) r.buf.shift();
       if (!!alive !== r.s.alive) r.s.setAlive(!!alive);
     }
-    for (const [id, r] of remotes) if (!seen.has(id)) { scene.remove(r.s.root); remotes.delete(id); }
-    if (m.vs) vehicleField?.sync(m.vs);
+    if (m.f) {
+      for (const [id, r] of remotes) if (!seen.has(id)) { scene.remove(r.s.root); remotes.delete(id); }
+    }
+    if (m.vs || m.f) vehicleField?.sync(m.vs || [], { full: !!m.f });
   },
+  pong(m) { pingMs = Math.max(0, performance.now() - (m.n || 0)); },
   spawn(m) {
     if (m.id === me.id) {
       me.pos.set(...m.p); me.vel.set(0, 0, 0); me.yaw = m.yaw; me.pitch = 0; me.seq = m.seq; me.hp = MAX_HP; me.alive = true;
@@ -392,18 +442,20 @@ function sendDrive(dt) {
   const fwd = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0) + (touch.fwd || 0);
   const steer = (keys.KeyA ? 1 : 0) - (keys.KeyD ? 1 : 0) - (touch.str || 0);
   const br = !!(keys.Space || (keys.KeyS && fwd <= 0 && !touch.fwd));
-  net({ t: 'drive', th: Math.max(-1, Math.min(1, fwd)), st: Math.max(-1, Math.min(1, steer)), br });
+  lastDrive = { th: Math.max(-1, Math.min(1, fwd)), st: Math.max(-1, Math.min(1, steer)), br };
+  net({ t: 'drive', ...lastDrive });
 }
 
 // ---------- Physics & collision ----------
 function overlapsAt(x, y, z, a) {
   return x + R > a.min[0] && x - R < a.max[0] && z + R > a.min[2] && z - R < a.max[2] && y + H > a.min[1] && y < a.max[1];
 }
-const blockedAt = (x, y, z) => AABBS.some(a => overlapsAt(x, y, z, a));
+const blockedAt = (x, y, z) => queryAABBs(AABBS, x, z, R + 0.05).some(a => overlapsAt(x, y, z, a));
 function moveAxis(i, amt) {
   const p = me.pos; const key = i === 0 ? 'x' : 'z';
   p[key] += amt;
-  for (const a of AABBS) {
+  const nearby = queryAABBs(AABBS, p.x, p.z, R + Math.abs(amt) + 0.6);
+  for (const a of nearby) {
     if (!overlapsAt(p.x, p.y, p.z, a)) continue;
     const step = a.max[1] - p.y;
     if (step > 0 && step <= 0.55 && me.onGround && !blockedAt(p.x, a.max[1] + 0.001, p.z)) { p.y = a.max[1]; continue; }
@@ -447,7 +499,8 @@ function physics(dt) {
   const yBefore = me.pos.y;
   me.pos.y += me.vel.y * dt; me.onGround = false;
   if (me.pos.y <= 0) { me.pos.y = 0; me.vel.y = Math.max(0, me.vel.y); me.onGround = true; }
-  for (const a of AABBS) {
+  const nearbyY = queryAABBs(AABBS, me.pos.x, me.pos.z, R + 0.2);
+  for (const a of nearbyY) {
     const over = me.pos.x + R > a.min[0] && me.pos.x - R < a.max[0] && me.pos.z + R > a.min[2] && me.pos.z - R < a.max[2];
     if (!over) continue;
     // Catch thin floor slabs that a fast fall would otherwise tunnel through.
@@ -467,15 +520,17 @@ function physics(dt) {
 const raycaster = new THREE.Raycaster();
 const tracers = [];
 const tracerGeo = new THREE.CylinderGeometry(0.012, 0.012, 1, 4, 1, true).translate(0, 0.5, 0).rotateX(Math.PI / 2);
+const sparkGeo = new THREE.SphereGeometry(0.06, 5, 4);
 function tracer(from, to, color = 0xfff1a8) {
   const m = new THREE.Mesh(tracerGeo, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85, depthWrite: false }));
   m.position.copy(from); m.lookAt(to); m.scale.set(1, 1, from.distanceTo(to)); scene.add(m); tracers.push({ m, life: 0.08 });
 }
 const sparks = [];
 function spark(p, color = '#ffd27a') {
-  const m = new THREE.Mesh(new THREE.SphereGeometry(0.06, 5, 4), new THREE.MeshBasicMaterial({ color, transparent: true }));
+  const m = new THREE.Mesh(sparkGeo, new THREE.MeshBasicMaterial({ color, transparent: true }));
   m.position.copy(p); scene.add(m); sparks.push({ m, life: 0.25 });
 }
+const _mwA = new THREE.Vector3(), _mwB = new THREE.Vector3(), _shootO = new THREE.Vector3(), _shootD = new THREE.Vector3();
 function startReload() {
   if (!me.alive || me.reloading || me.ammo === MAG_SIZE || me.reserve <= 0) return;
   me.reloading = true; me.reloadEnd = performance.now() + RELOAD_MS; sfx.reload();
@@ -483,9 +538,9 @@ function startReload() {
 // The view model has its own camera/FOV: project its muzzle to the screen, then back into the world.
 function muzzleWorld() {
   rig.updateMatrixWorld(true);
-  const p = RU.muzzle.getWorldPosition(new THREE.Vector3()).project(weaponCamera);
-  const v = new THREE.Vector3(p.x, p.y, 0.5).unproject(camera).sub(camera.position).normalize();
-  return camera.position.clone().addScaledVector(v, 0.8);
+  const p = RU.muzzle.getWorldPosition(_mwA).project(weaponCamera);
+  _mwB.set(p.x, p.y, 0.5).unproject(camera).sub(camera.position).normalize();
+  return _mwA.copy(camera.position).addScaledVector(_mwB, 0.8);
 }
 function shoot(now, moving) {
   if (me.vehicleId && me.seat === 0) return;
@@ -493,8 +548,8 @@ function shoot(now, moving) {
   if (me.ammo <= 0) { startReload(); return; }
   me.lastShot = now; me.ammo--;
   let spread = aiming ? 0.004 : 0.018; if (moving) spread += 0.02; if (!me.onGround) spread += 0.05; spread += me.recoil * 0.25;
-  const origin = camera.getWorldPosition(new THREE.Vector3());
-  const dir = new THREE.Vector3((Math.random() - 0.5) * spread, (Math.random() - 0.5) * spread, -1).normalize().applyQuaternion(camera.quaternion);
+  const origin = camera.getWorldPosition(_shootO);
+  const dir = _shootD.set((Math.random() - 0.5) * spread, (Math.random() - 0.5) * spread, -1).normalize().applyQuaternion(camera.quaternion);
   raycaster.set(origin, dir); raycaster.far = 200;
   const targets = colliders.slice();
   for (const r of remotes.values()) if (r.s.alive) targets.push(r.s.hitHead, r.s.hitBody);
@@ -597,21 +652,42 @@ function frame(now) {
     // network state @ 30Hz
     sendAcc += dt;
     if (sendAcc >= 1 / 30 && me.alive) { sendAcc = 0; net({ t: 'st', p: me.pos.toArray().map(v => Math.round(v * 100) / 100), yaw: me.yaw, pitch: me.pitch, seq: me.seq, ammo: me.ammo, reserve: me.reserve }); }
-    // remote interpolation (render 100ms in the past)
+    // Ping every 0.5s so the HUD can show RTT (Lagos→Frankfurt is often 150–250ms).
+    if (now - pingSentAt > 500) { pingSentAt = now; net({ t: 'ping', n: now }); }
+    // Own movement is predicted locally (physics runs here; the server accepts `st`).
+    // Remotes render ~100ms in the past; briefly extrapolate if a packet is late.
     const rt = now - 100;
+    const camPos = camera.position;
+    const fwdX = -Math.sin(camera.rotation.y), fwdZ = -Math.cos(camera.rotation.y);
     for (const r of remotes.values()) {
       const b = r.buf; if (!b.length) continue;
-      let a = b[0], c = b[b.length - 1];
-      for (let i = 0; i < b.length - 1; i++) if (b[i].t <= rt && b[i + 1].t >= rt) { a = b[i]; c = b[i + 1]; break; }
-      const k = c.t === a.t ? 1 : Math.max(0, Math.min(1, (rt - a.t) / (c.t - a.t)));
+      let a = b[0], c = b[b.length - 1], pair = false, pitch = c.pitch;
+      for (let i = 0; i < b.length - 1; i++) if (b[i].t <= rt && b[i + 1].t >= rt) { a = b[i]; c = b[i + 1]; pair = true; break; }
       const root = r.s.root;
-      root.position.set(a.x + (c.x - a.x) * k, a.y + (c.y - a.y) * k, a.z + (c.z - a.z) * k);
-      root.rotation.y = lerpAngle(a.yaw, c.yaw, k);
+      if (pair) {
+        const k = c.t === a.t ? 1 : Math.max(0, Math.min(1, (rt - a.t) / (c.t - a.t)));
+        root.position.set(a.x + (c.x - a.x) * k, a.y + (c.y - a.y) * k, a.z + (c.z - a.z) * k);
+        root.rotation.y = lerpAngle(a.yaw, c.yaw, k);
+        pitch = a.pitch + (c.pitch - a.pitch) * k;
+      } else if (rt > c.t) {
+        const ext = Math.min(0.1, (rt - c.t) / 1000);
+        root.position.set(c.x + (r.speedX || 0) * ext, c.y, c.z + (r.speedZ || 0) * ext);
+        root.rotation.y = c.yaw;
+        pitch = c.pitch;
+      } else {
+        root.position.set(a.x, a.y, a.z);
+        root.rotation.y = a.yaw;
+        pitch = a.pitch;
+      }
       const vx = (root.position.x - r.last.x) / Math.max(dt, 1e-3);
       const vz = (root.position.z - r.last.z) / Math.max(dt, 1e-3);
       const sp = Math.hypot(vx, vz);
       r.speed += (sp - r.speed) * Math.min(1, dt * 10);
-      r.s.update(dt, r.speed, a.pitch + (c.pitch - a.pitch) * k, { y: root.position.y, vx, vz, yaw: root.rotation.y });
+      r.speedX = vx; r.speedZ = vz;
+      const dx = root.position.x - camPos.x, dz = root.position.z - camPos.z;
+      const dist = Math.hypot(dx, camPos.y - root.position.y, dz);
+      const culled = dist > 8 && (dx * fwdX + dz * fwdZ) < -2;
+      r.s.update(dt, r.speed, pitch, { y: root.position.y, vx, vz, yaw: root.rotation.y, dist, culled });
       r.last.copy(root.position);
     }
     // HUD
@@ -634,9 +710,20 @@ function frame(now) {
     camera.position.set(Math.cos(t) * 30, 14, Math.sin(t) * 30); camera.lookAt(0, 2, 0);
   }
   pickupField?.update(now);
-  vehicleField?.update(dt, now);
+  vehicleField?.update(dt, now, {
+    id: me.vehicleId && me.seat === 0 ? me.vehicleId : 0,
+    aabbs: AABBS,
+    inputs: lastDrive,
+  });
   updateExplosions(dt, scene);
   if (joined) updateVehHint();
+  fpsFrames++;
+  if (now - fpsStamp >= 250) {
+    fpsVal = fpsFrames / Math.max(0.001, (now - fpsStamp) / 1000);
+    fpsFrames = 0; fpsStamp = now;
+    const el = $('perfhud');
+    if (el) el.textContent = `${Math.round(fpsVal)} FPS · ${Math.round(pingMs)} ms`;
+  }
   for (let i = tracers.length - 1; i >= 0; i--) { const tr = tracers[i]; tr.life -= dt; tr.m.material.opacity = Math.max(0, tr.life / 0.08) * 0.85; if (tr.life <= 0) { scene.remove(tr.m); tr.m.material.dispose(); tracers.splice(i, 1); } }
   for (let i = sparks.length - 1; i >= 0; i--) { const s = sparks[i]; s.life -= dt; s.m.material.opacity = s.life / 0.25; s.m.scale.setScalar(1 + (0.25 - s.life) * 4); if (s.life <= 0) { scene.remove(s.m); s.m.material.dispose(); sparks.splice(i, 1); } }
   renderer.clear();
@@ -651,4 +738,4 @@ initAccount({
 
 // Test hook: ?autojoin=Name joins immediately (used for headless screenshots)
 if (params.has('autojoin')) { $('name').value = params.get('autojoin') || 'Tester'; join(); }
-window.__game = { me, remotes, comms, anim, rifle, touch, isTouch, camera, scene, setAim: v => { aiming = v; setAiming(v); }, reload: () => startReload(), fire: () => { me.lastShot = 0; shoot(performance.now(), false); }, get joined() { return joined; }, get map() { return currentMap; }, forceView: null, get vehicles() { return vehicleField; }, tryEnterExit, keys, net };
+window.__game = { me, remotes, comms, anim, rifle, touch, isTouch, camera, scene, renderer, setAim: v => { aiming = v; setAiming(v); }, reload: () => startReload(), fire: () => { me.lastShot = 0; shoot(performance.now(), false); }, get joined() { return joined; }, get map() { return currentMap; }, forceView: null, get vehicles() { return vehicleField; }, tryEnterExit, keys, net, get fps() { return fpsVal; }, get ping() { return pingMs; }, get quality() { return qualityState; }, applyQuality };

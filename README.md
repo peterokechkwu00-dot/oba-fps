@@ -39,7 +39,7 @@ Other people on your network can join at `http://<your-ip>:3000`.
 | Env var        | Default | Meaning                                                |
 |----------------|---------|--------------------------------------------------------|
 | `PORT`         | 3000    | HTTP/WebSocket port                                    |
-| `BOTS`         | 3       | Server-side AI bots (they only move while a human is on) |
+| `BOTS`         | 2       | Server-side AI bots (they only move while a human is on; drop to 1 if the server CPU is high) |
 | `WIN_KILLS`    | 20      | Kills needed to win a round                            |
 | `MAP`          | `oba`   | Starting map id (`oba`, `onitsha`, `nnewi`, `awka`)    |
 | `VOTE_MS`      | 15000   | Map-vote window after a round, in milliseconds         |
@@ -77,7 +77,9 @@ After you tap **DEPLOY**, on-screen controls appear (no mouse lock). Rotate to l
 | **JUMP** / **R** | Jump / reload |
 | **CHAT** / **🎤** / **TAB** | Type a message, mute your mic, open the scoreboard |
 
-The page blocks scrolling, pinch-zoom and pull-to-refresh. On phones the renderer uses a lower pixel ratio and lighter shadows so it stays smooth.
+The page blocks scrolling, pinch-zoom and pull-to-refresh. Graphics quality defaults to **Auto** (Low on phones): a 1× pixel ratio, no shadows, closer fog, merged/instanced map meshes, and cheaper soldier updates for far players. You can switch Low / Medium / High from the play menu or the scoreboard; the choice is saved in the browser. An FPS and ping readout sits on the HUD.
+
+On-foot movement is predicted on your device so walking stays smooth even at 150–250ms ping. Other players and vehicles interpolate about 100ms in the past.
 | Esc | Release mouse |
 
 ## Communication
@@ -180,13 +182,17 @@ a tie is broken at random. The current map name is shown in the HUD, the menu an
 ## Architecture
 - `server.js`: Express serves `public/` and Three.js (`/vendor/three`), with a `ws` WebSocket server on `/ws`.
   The server owns players, health, armour, reserve ammo, pickups, kills/deaths, respawns, rounds, map rotation
-  and bots, and broadcasts snapshots at 20 Hz. Clients send their position at 30 Hz. Hits are raycast on the
+  and bots, and broadcasts compact 20 Hz snapshots (full state once a second, otherwise only entities that
+  changed). Clients send their position at 30 Hz. Hits are raycast on the
   client, then validated on the server: the shot origin must be near the shooter, the ray must pass close to
   the target's last known position, there must be no wall in between, and the fire rate is limited.
 - `public/shared/maps.js`: registry of every map, loaded by id. Each map owns its collision boxes, spawns,
   pickups, enterable interiors and bot-navigable layout.
 - `public/shared/interior.js`: helper that hollows a building into walls, floors, stairs, props and lights.
 - `public/shared/vehicles.js`: keke / car / danfo types, map spawns and arcade physics.
+- `public/shared/grid.js`: 4m spatial hash for collision and raycasts.
+- `public/shared/netsnap.js`: quantized player rows and snapshot deltas. `/health` reports `tickMs`, `bps` (bytes/sec per client), `bots` and `cpu`.
+- `public/graphics.js`: Auto / Low / Medium / High quality presets (saved in localStorage).
 - `public/drive.js`: client vehicle meshes, interpolation, smoke and explosions.
 - `public/shared/map-oba.js`, `map-onitsha.js`, `map-nnewi.js`, `map-awka.js`: the four arenas.
 - `public/shared/layout.js`: shared helpers and gameplay constants.

@@ -17,6 +17,8 @@ import {
   firstFreeSeat, occupierSeat, seatWorld, exitPos, vehicleBounds, vehicleSpeed,
   VEHICLE_TYPES, VEHICLE_RESPAWN, VEHICLE_ENTER_R,
 } from './public/shared/vehicles.js';
+import { queryAABBs } from './public/shared/grid.js';
+import { packPlayer, changedRows, q2 } from './public/shared/netsnap.js';
 import { initDb, dbReady } from './lib/db.js';
 import { mountAuth, accountFromCookie } from './lib/auth.js';
 import { mountShop, paystackWebhookHandler, paymentsEnabled } from './lib/shop.js';
@@ -25,7 +27,7 @@ import { recordKill, recordDeath, recordMatch } from './lib/progress.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3000;
 const WIN_KILLS = Number(process.env.WIN_KILLS) || 20;
-const BOT_COUNT = process.env.BOTS !== undefined ? Number(process.env.BOTS) : 3;
+const BOT_COUNT = process.env.BOTS !== undefined ? Number(process.env.BOTS) : 2;
 const TICK_HZ = 20;
 const VOTE_MS = Number(process.env.VOTE_MS) || 15000;
 const PICKUP_RESPAWN_MS = {
@@ -36,6 +38,14 @@ const PICKUP_RESPAWN_MS = {
 const REGEN_DELAY_MS = Number(process.env.REGEN_DELAY) || REGEN_DELAY;
 const REGEN_HP_S = Number(process.env.REGEN_RATE) || REGEN_RATE;
 const VEH_RESPAWN_MS = Number(process.env.VEH_RESPAWN) || VEHICLE_RESPAWN;
+const CPU_SOFT = Number(process.env.CPU_SOFT) || 0.10; // drop a bot above this fraction of one core
+
+let tickMsEma = 0, lastBps = 0, lastLag = 0, lastCpu = 0;
+let activeBots = BOT_COUNT;
+let bytesSent = 0, bytesT = Date.now();
+let cpuMark = process.cpuUsage(), cpuMarkT = Date.now();
+const prevPs = new Map(), prevVs = new Map();
+let snapTick = 0;
 
 const app = express();
 app.set('trust proxy', 1);
@@ -57,6 +67,11 @@ app.get('/health', (_req, res) => res.json({
   name: map.name,
   db: dbReady,
   payments: paymentsEnabled(),
+  tickMs: Math.round(tickMsEma * 100) / 100,
+  bps: lastBps,
+  bots: activeBots,
+  lag: lastLag,
+  cpu: lastCpu,
 }));
 
 const server = http.createServer(app);
@@ -82,7 +97,9 @@ function applyMap(id) {
   ARENA_HALF = map.ARENA_HALF;
   pickups = map.PICKUPS.map((p, i) => ({ id: i, kind: p.kind, x: p.x, y: p.y || 0, z: p.z, up: true, respawnAt: 0 }));
   vehicles = vehicleSpawns(map.id).map((sp, i) => createVehicle(i + 1, sp));
+  prevPs.clear(); prevVs.clear(); snapTick = 0;
 }
+
 applyMap(process.env.MAP || process.env.DEFAULT_MAP || DEFAULT_MAP);
 
 const mapInfo = () => ({ id: map.id, name: map.name });
@@ -97,11 +114,18 @@ function voteCounts() {
   return counts;
 }
 
-const round2 = v => Math.round(v * 100) / 100;
-const send = (ws, m) => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(m)); };
+const round2 = q2;
+const send = (ws, m) => {
+  if (ws && ws.readyState === 1) {
+    const s = typeof m === 'string' ? m : JSON.stringify(m);
+    bytesSent += Buffer.byteLength(s);
+    ws.send(s);
+  }
+};
 function broadcast(m, except) {
   const s = JSON.stringify(m);
-  for (const p of players.values()) if (p.ws && p !== except && p.ws.readyState === 1) p.ws.send(s);
+  const n = Buffer.byteLength(s);
+  for (const p of players.values()) if (p.ws && p !== except && p.ws.readyState === 1) { bytesSent += n; p.ws.send(s); }
 }
 const roster = () => [...players.values()].map(p => ({
   id: p.id, name: p.name, k: p.kills, d: p.deaths, bot: !!p.bot, c: p.color, talk: !!p.talking,
@@ -510,6 +534,8 @@ wss.on('connection', (ws, req) => {
     } else if (m.t === 'talk') {
       me.talking = !!m.on;
       broadcast({ t: 'talk', id: me.id, on: me.talking }, me);
+    } else if (m.t === 'ping') {
+      send(ws, { t: 'pong', n: m.n });
     }
   });
   ws.on('close', () => { if (me) removePlayer(me); });
@@ -520,7 +546,8 @@ wss.on('connection', (ws, req) => {
 function botBlocked(x, z) {
   const r = PLAYER_RADIUS + 0.1;
   if (Math.abs(x) > ARENA_HALF - 1 || Math.abs(z) > ARENA_HALF - 1) return true;
-  for (const a of AABBS) {
+  const list = queryAABBs(AABBS, x, z, r);
+  for (const a of list) {
     // Ignore floors/lintels that a ground-level bot would walk under or stand beneath.
     if (a.min[1] >= PLAYER_HEIGHT || a.max[1] <= 0.05) continue;
     if (x + r > a.min[0] && x - r < a.max[0] && z + r > a.min[2] && z - r < a.max[2]) return true;
@@ -539,16 +566,22 @@ function hasLOS(a, b) {
   const len = Math.hypot(...d);
   return rayMap(a, d.map(v => v / len), AABBS) > len - 0.3;
 }
-function updateBot(b, dt, now) {
-  if (!b.alive || roundOver || humans() === 0) return;
+function updateBot(b, dt, now, tickN) {
+  if (!b.alive || roundOver || humans() === 0 || b.parked) return;
   const e = eye(b);
-  let target = null, best = 45;
-  for (const o of players.values()) {
-    if (o === b || !o.alive) continue;
-    const c = [o.p[0], o.p[1] + CHEST_Y, o.p[2]];
-    const dist = Math.hypot(c[0] - e[0], c[1] - e[1], c[2] - e[2]);
-    if (dist < best && hasLOS(e, c)) { best = dist; target = o; }
+  // Refresh line-of-sight only every 3 ticks, staggered per bot.
+  if ((tickN + b.id) % 3 === 0) {
+    let tgt = null, bestD = 45;
+    for (const o of players.values()) {
+      if (o === b || !o.alive) continue;
+      const c = [o.p[0], o.p[1] + CHEST_Y, o.p[2]];
+      const dist = Math.hypot(c[0] - e[0], c[1] - e[1], c[2] - e[2]);
+      if (dist < bestD && hasLOS(e, c)) { bestD = dist; tgt = o; }
+    }
+    b._tgt = tgt; b._tgtDist = bestD;
   }
+  const target = (b._tgt && b._tgt.alive) ? b._tgt : null;
+  const best = b._tgtDist || 45;
   let mx = 0, mz = 0, speed = 4.2;
   if (target) {
     const dx = target.p[0] - b.p[0], dz = target.p[2] - b.p[2];
@@ -584,24 +617,65 @@ for (let i = 0; i < BOT_COUNT; i++) createPlayer(BOT_NAMES[i % BOT_NAMES.length]
 
 // ---------- Main loop ----------
 let last = Date.now();
+let tickN = 0;
+function adjustLoad(tickMs, now) {
+  if (now - cpuMarkT < 2000) return;
+  const diff = process.cpuUsage(cpuMark);
+  const elapsed = Math.max(1, now - cpuMarkT);
+  lastCpu = Math.round(((diff.user + diff.system) / (elapsed * 1000)) * 1000) / 1000;
+  cpuMark = process.cpuUsage();
+  cpuMarkT = now;
+  const hot = lastCpu > CPU_SOFT || tickMs > 8;
+  const cool = lastCpu < CPU_SOFT * 0.5 && tickMs < 3;
+  if (hot && activeBots > 1) {
+    activeBots--;
+    let n = 0;
+    for (const p of players.values()) if (p.bot) { n++; p.parked = n > activeBots; }
+  } else if (cool && activeBots < BOT_COUNT) {
+    activeBots++;
+    let n = 0;
+    for (const p of players.values()) if (p.bot) { n++; p.parked = n > activeBots; }
+  }
+}
 setInterval(() => {
   const now = Date.now();
-  const dt = Math.min(0.1, (now - last) / 1000); last = now;
+  const rawDt = (now - last) / 1000;
+  lastLag = Math.max(0, Math.round((rawDt - 1 / TICK_HZ) * 1000));
+  if (rawDt > 0.08) console.warn('event-loop stall', Math.round(rawDt * 1000), 'ms');
+  const dt = Math.min(0.1, rawDt); last = now;
+  const t0 = performance.now();
+  tickN++;
   for (const p of players.values()) {
     if (!p.alive && !roundOver && now >= p.respawnAt) spawn(p);
     if (p.alive && !roundOver && p.hp < MAX_HP && now - p.lastHurt >= REGEN_DELAY_MS) {
       p.hp = Math.min(MAX_HP, p.hp + REGEN_HP_S * dt);
     }
-    if (p.bot) updateBot(p, dt, now);
+    if (p.bot) updateBot(p, dt, now, tickN);
   }
   tickPickups(now);
   tickVehicles(dt, now);
-  if (humans() === 0) return;
-  broadcast({
-    t: 's', ts: now,
-    ps: [...players.values()].map(p => [p.id, round2(p.p[0]), round2(p.p[1]), round2(p.p[2]), round2(p.yaw), round2(p.pitch), Math.round(p.hp), Math.round(p.armour), p.alive ? 1 : 0]),
-    vs: vehicles.map(packVehicle),
-  });
+  if (humans() > 0) {
+    snapTick++;
+    const full = snapTick % 20 === 1;
+    const ps = [...players.values()].map(packPlayer);
+    const vs = vehicles.map(packVehicle);
+    const psOut = full ? ps : changedRows(ps, prevPs);
+    const vsOut = full ? vs : changedRows(vs, prevVs);
+    prevPs.clear(); for (const r of ps) prevPs.set(r[0], r);
+    prevVs.clear(); for (const r of vs) prevVs.set(r[0], r);
+    const msg = { t: 's', ts: now, ps: psOut, vs: vsOut };
+    if (full) msg.f = 1;
+    broadcast(msg);
+  }
+  const ms = performance.now() - t0;
+  tickMsEma = tickMsEma ? tickMsEma * 0.9 + ms * 0.1 : ms;
+  if (ms > 20) console.warn('slow tick', ms.toFixed(1), 'ms');
+  if (now - bytesT >= 1000) {
+    const n = Math.max(1, humans());
+    lastBps = Math.round(bytesSent / n / ((now - bytesT) / 1000));
+    bytesSent = 0; bytesT = now;
+    adjustLoad(tickMsEma, now);
+  }
 }, 1000 / TICK_HZ);
 
 initDb().then(() => {

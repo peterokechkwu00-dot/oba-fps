@@ -1,6 +1,7 @@
 // Drivable vehicles: types, per-map spawns, arcade physics, seat layout.
 // Shared by the server (authoritative) and the client / tests.
 
+import { queryAABBs } from './grid.js';
 export const VEHICLE_RESPAWN = 45000;
 export const VEHICLE_ENTER_R = 2.9;
 export const VEHICLE_TYPES = {
@@ -119,7 +120,8 @@ function bodyPoints(x, z, yaw, typ) {
 }
 
 function aabbHits(px, pz, typ, aabbs, y) {
-  for (const a of aabbs) {
+  const list = queryAABBs(aabbs, px, pz, 0.2);
+  for (const a of list) {
     if (a.min[1] >= typ.h + (y || 0) || a.max[1] <= (y || 0) + 0.12) continue;
     if (px > a.min[0] && px < a.max[0] && pz > a.min[2] && pz < a.max[2]) return true;
   }
@@ -172,7 +174,8 @@ export function vehicleBlocked(x, z, yaw, typ, aabbs, y, self, others) {
 
 export function standY(x, z, aabbs, cap = 8) {
   let y = 0;
-  for (const a of aabbs) {
+  const list = queryAABBs(aabbs, x, z, 0.05);
+  for (const a of list) {
     if (x >= a.min[0] && x <= a.max[0] && z >= a.min[2] && z <= a.max[2] && a.max[1] <= cap + 1e-6 && a.max[1] > y && a.max[1] < 3.2) y = a.max[1];
   }
   return y;

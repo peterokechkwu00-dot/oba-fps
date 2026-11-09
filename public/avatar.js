@@ -444,6 +444,13 @@ export class Soldier {
     if (this.flashT > 0) { this.flashT -= dt; if (this.flashT <= 0 && this.flash) this.flash.visible = false; }
     this.recoil = Math.max(0, this.recoil - dt * 8);
     this._pitch = pitch || 0;
+    const dist = info.dist || 0;
+    if (info.culled && dist > 8) {
+      this.root.visible = dist < 90;
+      if (this.tag) this.tag.visible = false;
+      return;
+    }
+    if (this.root) this.root.visible = true;
 
     if (!this.alive) {
       this.deadT += dt;
@@ -467,6 +474,19 @@ export class Soldier {
     }
 
     if (!this.ready) return;
+
+    // Skip expensive skeleton / two-bone IK for far soldiers.
+    if (dist > 48) {
+      if (this.tag) this.tag.visible = false;
+      this._updateHitboxes();
+      return;
+    }
+    if (dist > 28 && this.mixer) {
+      this.mixer.update(dt * 0.5);
+      this._updateHitboxes();
+      this._updateTag();
+      return;
+    }
 
     const airborne = (info.y || 0) > 0.18;
     const vx = info.vx || 0, vz = info.vz || 0;

@@ -5,7 +5,9 @@ import WebSocket from 'ws';
 import { spawn as spawnProc } from 'child_process';
 import { fileURLToPath } from 'url';
 import path from 'path';
-import { getMap, listMaps, rayMap, standHeight, PLAYER_RADIUS as PR, PLAYER_HEIGHT as PH, DEFAULT_MAP } from '../public/shared/map.js';
+import { getMap, listMaps, rayMap, standHeight, rayAABB, queryAABBs, getGrid, PLAYER_RADIUS as PR, PLAYER_HEIGHT as PH, DEFAULT_MAP } from '../public/shared/map.js';
+import { packPlayer, changedRows, applySnapshot } from '../public/shared/netsnap.js';
+import { PRESETS } from '../public/graphics.js';
 import { vehicleSpawns, firstFreeSeat, createVehicle, VEHICLE_TYPES } from '../public/shared/vehicles.js';
 
 const URL = process.argv[2] || `ws://localhost:${process.env.PORT || 3000}/ws`;
@@ -190,6 +192,58 @@ try {
       }
     }
   }
+} catch (e) { ok = false; log('ERROR', e.message); }
+
+
+log('--- spatial grid + snapshots + graphics ---');
+try {
+  function bruteRay(o, d, aabbs) {
+    let best = Infinity;
+    for (const a of aabbs) { const t = rayAABB(o, d, a); if (t < best) best = t; }
+    if (d[1] < -1e-6) { const t = -o[1] / d[1]; if (t >= 0 && t < best) best = t; }
+    return best;
+  }
+  function bruteStand(x, z, aabbs, cap = 40) {
+    let y = 0;
+    for (const a of aabbs) {
+      if (x >= a.min[0] && x <= a.max[0] && z >= a.min[2] && z <= a.max[2] && a.max[1] <= cap + 1e-6 && a.max[1] > y) y = a.max[1];
+    }
+    return y;
+  }
+  for (const { id } of listMaps()) {
+    const m = getMap(id);
+    check(!!getGrid(m.AABBS), `${id}: grid attached to AABBS`);
+    let rayOk = 0, standOk = 0, queryOk = 0, N = 80;
+    for (let i = 0; i < N; i++) {
+      const o = [(Math.random() * 80 - 40), 0.5 + Math.random() * 8, (Math.random() * 80 - 40)];
+      const d0 = [Math.random() * 2 - 1, Math.random() * 1.2 - 0.6, Math.random() * 2 - 1];
+      const len = Math.hypot(...d0) || 1;
+      const d = d0.map(v => v / len);
+      const tg = rayMap(o, d, m.AABBS), tb = bruteRay(o, d, m.AABBS);
+      if (Math.abs(tg - tb) < 1e-4 || (tg === Infinity && tb === Infinity)) rayOk++;
+      const x = Math.random() * 70 - 35, z = Math.random() * 70 - 35;
+      if (Math.abs(standHeight(x, z, m.AABBS) - bruteStand(x, z, m.AABBS)) < 1e-6) standOk++;
+      const hits = m.AABBS.filter(a => x >= a.min[0] && x <= a.max[0] && z >= a.min[2] && z <= a.max[2]);
+      const q = queryAABBs(m.AABBS, x, z, 0.02);
+      if (hits.every(a => q.includes(a))) queryOk++;
+    }
+    check(rayOk === N, `${id}: grid rayMap matches brute force (${rayOk}/${N})`);
+    check(standOk === N, `${id}: grid standHeight matches brute force (${standOk}/${N})`);
+    check(queryOk === N, `${id}: queryAABBs never misses an overlapping box (${queryOk}/${N})`);
+  }
+  const p1 = { id: 1, p: [1.234, 0, 5.678], yaw: 1.23, pitch: 0.1, hp: 100, armour: 0, alive: true };
+  const r1 = packPlayer(p1);
+  const unchanged = changedRows([r1], new Map([[1, r1]]));
+  check(unchanged.length === 0, 'delta omits an unchanged player');
+  p1.p[0] = 2.5;
+  const r2 = packPlayer(p1);
+  const changed = changedRows([r2], new Map([[1, r1]]));
+  check(changed.length === 1 && changed[0][1] === 2.5, 'delta includes a moved player');
+  const store = applySnapshot({}, { t: 's', f: 1, ps: [r1], vs: [[7, 0, 1, 0, 2, 0, 80, 1]] });
+  applySnapshot(store, { t: 's', ps: [r2] });
+  check(store.ps.get(1)[1] === 2.5 && store.vs.get(7)[0] === 7, 'applying a delta keeps other entities and updates the player');
+  check(PRESETS.low.shadows === false && PRESETS.low.pixelRatio === 1 && PRESETS.low.lights === 0, 'low preset: no shadows, pixelRatio 1, no interior lights');
+  check(PRESETS.medium.shadows === false && PRESETS.high.shadows === true, 'medium has no shadows, high does');
 } catch (e) { ok = false; log('ERROR', e.message); }
 
 function waitListen(child, ms = 8000) {

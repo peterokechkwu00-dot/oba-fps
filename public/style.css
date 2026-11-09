@@ -242,3 +242,9 @@ table.board tr.me td { color: #c9e265; font-weight: bold; }
 }
 #btnEnter { left: max(16px, env(safe-area-inset-left)); bottom: calc(max(20px, env(safe-area-inset-bottom)) + 108px); right: auto; }
 body.touch.portrait #btnEnter { bottom: calc(max(16px, env(safe-area-inset-bottom)) + 100px); }
+
+#perfhud { position: absolute; top: max(8px, env(safe-area-inset-top)); right: 8px; z-index: 8; font: 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; background: rgba(0,0,0,.45); padding: 3px 7px; border-radius: 3px; pointer-events: none; letter-spacing: .3px; }
+.gfx-label { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: #ccc; margin: 10px 0 4px; }
+.gfx-label select { background: #1a1a1a; color: #fff; border: 1px solid #3d5a2d; border-radius: 4px; padding: 4px 8px; font-size: 13px; }
+#settings .gfx-label { margin: 0 12px 0 0; }
+body.touch #perfhud { top: auto; bottom: max(8px, env(safe-area-inset-bottom)); right: 8px; }

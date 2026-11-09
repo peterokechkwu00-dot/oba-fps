@@ -1,7 +1,7 @@
 // Client-side vehicle meshes, interpolation, smoke and explosion.
 import * as THREE from 'three';
 import { buildKeke, buildDanfo, buildCar } from './world.js';
-import { unpackVehicle, VEHICLE_TYPES, ID_TYPES, vehicleSpeed } from './shared/vehicles.js';
+import { unpackVehicle, VEHICLE_TYPES, ID_TYPES, vehicleSpeed, stepVehicle } from './shared/vehicles.js';
 
 const builders = { keke: () => buildKeke(0), danfo: () => buildDanfo(0), car: () => buildCar(0) };
 
@@ -33,33 +33,55 @@ export function createVehicleField(scene) {
 
   return {
     root,
-    sync(rows) {
+    sync(rows, opts = {}) {
       const seen = new Set();
       for (const row of rows || []) {
         const rec = ensure(row);
         seen.add(rec.id);
+        rec.simT = performance.now();
       }
-      for (const [id, rec] of byId) {
-        if (seen.has(id)) continue;
-        root.remove(rec.mesh);
-        if (rec.smoke) root.remove(rec.smoke);
-        byId.delete(id);
+      if (opts.full) {
+        for (const [id, rec] of byId) {
+          if (seen.has(id)) continue;
+          root.remove(rec.mesh);
+          if (rec.smoke) root.remove(rec.smoke);
+          byId.delete(id);
+        }
       }
     },
-    update(dt, now) {
-      const rt = now - 80;
+    update(dt, now, driveOpts = {}) {
+      const rt = now - 100;
+      const drivingId = driveOpts.id || 0;
       for (const rec of byId.values()) {
         const b = rec.buf;
         if (!b.length) continue;
-        let a = b[0], c = b[b.length - 1];
-        for (let i = 0; i < b.length - 1; i++) if (b[i].t <= rt && b[i + 1].t >= rt) { a = b[i]; c = b[i + 1]; break; }
-        const k = c.t === a.t ? 1 : Math.max(0, Math.min(1, (rt - a.t) / (c.t - a.t)));
-        const x = a.x + (c.x - a.x) * k;
-        const y = a.y + (c.y - a.y) * k;
-        const z = a.z + (c.z - a.z) * k;
+        let x, y, z, yaw, hp, alive, seats;
+        const last = b[b.length - 1];
+        if (drivingId && rec.id === drivingId && driveOpts.aabbs) {
+          // Client-side prediction for the vehicle we are driving: start from the
+          // latest server state and step with our last inputs up to ~150ms ahead.
+          const v = {
+            ...last, vx: rec.predVx || 0, vz: rec.predVz || 0, speed: rec.predSpeed || 0,
+            throttle: driveOpts.inputs?.th || 0, steer: driveOpts.inputs?.st || 0, brake: !!driveOpts.inputs?.br,
+            sx: last.x, sz: last.z, syaw: last.yaw, seats: last.seats || [],
+          };
+          const ahead = Math.min(0.15, Math.max(0, (now - (rec.simT || now)) / 1000));
+          if (ahead > 0) stepVehicle(v, ahead, driveOpts.aabbs, []);
+          rec.predVx = v.vx; rec.predVz = v.vz; rec.predSpeed = v.speed;
+          x = v.x; y = v.y; z = v.z; yaw = v.yaw; hp = last.hp; alive = last.alive; seats = last.seats;
+        } else {
+          let a = b[0], c = last, pair = false;
+          for (let i = 0; i < b.length - 1; i++) if (b[i].t <= rt && b[i + 1].t >= rt) { a = b[i]; c = b[i + 1]; pair = true; break; }
+          const k = !pair || c.t === a.t ? 1 : Math.max(0, Math.min(1, (rt - a.t) / (c.t - a.t)));
+          x = a.x + (c.x - a.x) * k;
+          y = a.y + (c.y - a.y) * k;
+          z = a.z + (c.z - a.z) * k;
+          yaw = lerpAngle(a.yaw, c.yaw, k);
+          hp = c.hp; alive = c.alive; seats = c.seats;
+        }
         rec.mesh.position.set(x, y, z);
-        rec.mesh.rotation.y = lerpAngle(a.yaw, c.yaw, k);
-        rec.render = { id: rec.id, x, y, z, yaw: rec.mesh.rotation.y, type: rec.type, hp: c.hp, alive: c.alive, seats: c.seats };
+        rec.mesh.rotation.y = yaw;
+        rec.render = { id: rec.id, x, y, z, yaw, type: rec.type, hp, alive, seats };
         if (rec.smoke) {
           rec.smoke.position.set(x, y + VEHICLE_TYPES[rec.type].h - 0.2, z);
           rec.smoke.rotation.y += dt * 0.8;

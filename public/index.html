@@ -19,6 +19,7 @@
   <div id="hitmarker"></div>
   <div id="vignette"></div>
   <div id="topbar"><span id="mapname"></span><span id="score"></span></div>
+  <div id="perfhud">-- FPS · -- ms</div>
   <div id="killfeed"></div>
   <div id="centermsg"></div>
   <div id="health">
@@ -41,7 +42,12 @@
     </div>
   </div>
   <div id="scoreboard" class="hidden"><h2>SCOREBOARD — <span id="sbmap"></span></h2><table><thead><tr><th></th><th>Player</th><th>Kills</th><th>Deaths</th><th>K/D</th><th>Voice</th></tr></thead><tbody id="sbbody"></tbody></table><div class="sbhint">First to <span id="sbwin">20</span> kills wins the round · Press Esc to free the mouse and click 🔇 to mute a player</div>
-    <div id="settings"><label><input type="checkbox" id="openmic" /> Microphone on (V)</label><label>Voice volume <input type="range" id="voicevol" min="0" max="1" step="0.05" /></label><span class="hint desktop-only">Voice is open-mic: <b>V</b> mutes/unmutes you · <b>T</b>/<b>Enter</b> to chat</span><span class="hint mobile-only">Voice is open-mic: tap 🎤 to mute/unmute · CHAT to type</span></div>
+    <div id="settings"><label class="gfx-label">Graphics <select id="gfx2" aria-label="Graphics quality">
+          <option value="auto">Auto</option>
+          <option value="low">Low</option>
+          <option value="medium">Medium</option>
+          <option value="high">High</option>
+        </select></label><label><input type="checkbox" id="openmic" /> Microphone on (V)</label><label>Voice volume <input type="range" id="voicevol" min="0" max="1" step="0.05" /></label><span class="hint desktop-only">Voice is open-mic: <b>V</b> mutes/unmutes you · <b>T</b>/<b>Enter</b> to chat</span><span class="hint mobile-only">Voice is open-mic: tap 🎤 to mute/unmute · CHAT to type</span></div>
     <button type="button" id="sbclose" class="mobile-only">Close</button></div>
 </div>
 
@@ -81,6 +87,14 @@
       <input id="name" maxlength="16" placeholder="Enter your callsign" autocomplete="off" />
       <button id="play">DEPLOY</button>
       <div id="status"></div>
+      <label class="gfx-label">Graphics
+        <select id="gfx" aria-label="Graphics quality">
+          <option value="auto">Auto</option>
+          <option value="low">Low</option>
+          <option value="medium">Medium</option>
+          <option value="high">High</option>
+        </select>
+      </label>
       <div class="controls desktop-only">
         <div><b>WASD</b> move</div><div><b>Mouse</b> look</div><div><b>Space</b> jump</div><div><b>Shift</b> sprint</div>
         <div><b>Left click</b> shoot</div><div><b>Right click</b> aim</div><div><b>R</b> reload</div><div><b>Tab</b> scoreboard</div><div><b>T / Enter</b> text chat</div><div><b>V</b> mute / unmute mic</div>
