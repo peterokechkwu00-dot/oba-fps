@@ -1,6 +1,20 @@
 // Remote player "soldier" figure with name tag, simple walk animation and hitboxes.
 import * as THREE from 'three';
 import { HEAD_Y } from './shared/map.js';
+import { buildRifle } from './weapon.js';
+
+let speakerTex = null;
+function speakerSprite() {
+  if (!speakerTex) {
+    const c = document.createElement('canvas'); c.width = c.height = 64; const g = c.getContext('2d');
+    g.fillStyle = 'rgba(0,0,0,0.5)'; g.beginPath(); g.arc(32, 32, 30, 0, 7); g.fill();
+    g.fillStyle = '#7CFC00'; g.beginPath(); g.moveTo(14, 25); g.lineTo(24, 25); g.lineTo(36, 14); g.lineTo(36, 50); g.lineTo(24, 39); g.lineTo(14, 39); g.fill();
+    g.strokeStyle = '#7CFC00'; g.lineWidth = 4; for (const r of [8, 15]) { g.beginPath(); g.arc(38, 32, r, -0.9, 0.9); g.stroke(); }
+    speakerTex = new THREE.CanvasTexture(c); speakerTex.colorSpace = THREE.SRGBColorSpace;
+  }
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: speakerTex, transparent: true }));
+  s.scale.set(0.32, 0.32, 1); s.position.set(-0.98, 2.25, 0); s.visible = false; return s;
+}
 
 function nameSprite(name) {
   const c = document.createElement('canvas'); c.width = 256; c.height = 64;
@@ -43,12 +57,11 @@ export class Soldier {
 
     // arms + gun pitch together
     this.aim = new THREE.Group(); this.aim.position.set(0, 1.42, 0); this.body.add(this.aim);
-    add(this.aim, new THREE.BoxGeometry(0.14, 0.14, 0.5), uni, 0.3, -0.1, -0.2);
-    add(this.aim, new THREE.BoxGeometry(0.14, 0.14, 0.5), uni, -0.12, -0.1, -0.35);
-    add(this.aim, new THREE.BoxGeometry(0.08, 0.14, 0.75), dark, 0.12, -0.05, -0.5);
-    add(this.aim, new THREE.BoxGeometry(0.05, 0.2, 0.1), dark, 0.12, -0.18, -0.45);
-    this.flash = new THREE.Mesh(new THREE.SphereGeometry(0.09, 6, 6), new THREE.MeshBasicMaterial({ color: '#ffd27a' }));
-    this.flash.position.set(0.12, -0.05, -0.92); this.flash.visible = false; this.aim.add(this.flash);
+    const rArm = add(this.aim, new THREE.BoxGeometry(0.13, 0.13, 0.42), uni, 0.24, -0.12, -0.12); rArm.rotation.y = 0.35;
+    const lArm = add(this.aim, new THREE.BoxGeometry(0.13, 0.13, 0.55), uni, 0.0, -0.1, -0.33); lArm.rotation.y = -0.45;
+    this.rifle = buildRifle('low'); this.rifle.position.set(0.11, -0.04, -0.2); this.aim.add(this.rifle);
+    this.flash = new THREE.Mesh(new THREE.SphereGeometry(0.07, 6, 6), new THREE.MeshBasicMaterial({ color: '#ffd27a' }));
+    this.flash.position.z = -0.03; this.flash.visible = false; this.rifle.userData.muzzle.add(this.flash);
 
     // hitboxes (used by local raycasts)
     this.hitBody = new THREE.Mesh(new THREE.BoxGeometry(0.75, 1.5, 0.6), hitMat); this.hitBody.position.y = 0.75;
@@ -56,12 +69,14 @@ export class Soldier {
     for (const [m, part] of [[this.hitBody, 'body'], [this.hitHead, 'head']]) { m.userData = { pid: id, part }; this.root.add(m); }
 
     this.tag = nameSprite(name); this.root.add(this.tag);
+    this.speaker = speakerSprite(); this.root.add(this.speaker);
     this.walk = 0; this.alive = true; this.deadT = 0; this.flashT = 0;
   }
   setName(name) { if (name === this.name) return; this.name = name; this.root.remove(this.tag); this.tag = nameSprite(name); this.root.add(this.tag); }
+  setSpeaking(on) { this.speaker.visible = !!on && this.alive; }
   muzzle() { this.flash.visible = true; this.flashT = 0.05; }
   gunTip(out) { return this.flash.getWorldPosition(out); }
-  setAlive(a) { this.alive = a; this.deadT = 0; if (a) { this.body.rotation.set(0, 0, 0); this.body.position.y = 0; this.tag.visible = true; } else this.tag.visible = false; }
+  setAlive(a) { this.alive = a; this.deadT = 0; if (a) { this.body.rotation.set(0, 0, 0); this.body.position.y = 0; this.tag.visible = true; } else { this.tag.visible = false; this.speaker.visible = false; } }
   update(dt, speed, pitch) {
     if (this.flashT > 0) { this.flashT -= dt; if (this.flashT <= 0) this.flash.visible = false; }
     if (!this.alive) {

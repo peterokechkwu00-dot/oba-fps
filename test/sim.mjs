@@ -19,6 +19,7 @@ function client(name) {
   c.open = new Promise(r => ws.on('open', r));
   return c;
 }
+const _unused = 0;
 const pos = (c, p, yaw = 0) => c.send({ t: 'st', p, yaw, pitch: 0, seq: c.seq });
 
 let ok = true; const check = (cond, msg) => { log(cond ? 'PASS' : 'FAIL', msg); if (!cond) ok = false; };
@@ -74,7 +75,35 @@ try {
   a.send({ t: 'shoot', o: o2, d: d2.map(v => v / l2), e: [0, 1.15, 3.5], hit: b.id, head: false });
   await sleep(400);
   check(a.msgs.filter(m => m.t === 'hit').length === n0, 'shot through the monument was rejected by server (wall check)');
-  a.ws.close(); b.ws.close();
+  // ---- Text chat ----
+  a.send({ t: 'chat', msg: '  Hello from Oba! <script>alert(1)</script>  ' });
+  const ch = await b.wait(m => m.t === 'chat' && m.id === a.id, 2000);
+  check(ch.name === 'Alpha' && ch.msg === 'Hello from Oba! <script>alert(1)</script>', `chat broadcast received by Bravo: "${ch.msg}" (client renders via textContent, so HTML is inert)`);
+  check(a.msgs.some(m => m.t === 'chat' && m.id === a.id), 'sender also receives its own chat line');
+  await sleep(700);
+  a.send({ t: 'chat', msg: 'x'.repeat(500) });
+  const long = await b.wait(m => m.t === 'chat' && m.id === a.id && m.msg.startsWith('xxx'), 2000);
+  check(long.msg.length === 120, `long message truncated to ${long.msg.length} chars`);
+  a.send({ t: 'chat', msg: 'spam1' }); a.send({ t: 'chat', msg: 'spam2' });
+  await sleep(300);
+  check(!b.msgs.some(m => m.t === 'chat' && m.msg === 'spam2') && a.msgs.some(m => m.t === 'chat' && m.id === 0 && /too fast/.test(m.msg)), 'rate limit blocks rapid-fire messages and warns the sender');
+  // ---- Voice signalling relay ----
+  a.send({ t: 'rtc', to: b.id, data: { sdp: { type: 'offer', sdp: 'v=0 fake-offer' } } });
+  const off = await b.wait(m => m.t === 'rtc' && m.from === a.id, 2000);
+  check(off.data.sdp.type === 'offer', 'WebRTC offer relayed A -> B with correct sender id');
+  b.send({ t: 'rtc', to: a.id, data: { sdp: { type: 'answer', sdp: 'v=0 fake-answer' } } });
+  b.send({ t: 'rtc', to: a.id, data: { ice: { candidate: 'candidate:1 1 udp 1 1.2.3.4 5 typ host', sdpMid: '0' } } });
+  const ans = await a.wait(m => m.t === 'rtc' && m.from === b.id && m.data.sdp, 2000);
+  const ice = await a.wait(m => m.t === 'rtc' && m.from === b.id && m.data.ice, 2000);
+  check(ans.data.sdp.type === 'answer' && !!ice.data.ice.candidate, 'answer + ICE candidate relayed B -> A');
+  a.send({ t: 'talk', on: true });
+  const tk = await b.wait(m => m.t === 'talk' && m.id === a.id, 2000);
+  check(tk.on === true, 'push-to-talk state (speaking indicator) broadcast');
+  // ---- leave message ----
+  a.ws.close();
+  const lv = await b.wait(m => m.t === 'feed' && /Alpha left/.test(m.msg), 2000);
+  check(!!lv, 'leave message shown to remaining players');
+  b.ws.close();
 } catch (e) { ok = false; log('ERROR', e.message); }
 log(ok ? 'ALL TESTS PASSED' : 'SOME TESTS FAILED');
 process.exit(ok ? 0 : 1);

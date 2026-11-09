@@ -7,6 +7,9 @@ import {
 import { buildWorld } from './world.js';
 import { Soldier } from './avatar.js';
 import * as sfx from './audio.js';
+import { buildRifle, flashTexture } from './weapon.js';
+import * as comms from './comms.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 const $ = id => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -17,6 +20,7 @@ $('name').value = localStorage.getItem('fps-name') || '';
 const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: params.has('autojoin') });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
+renderer.autoClear = false;
 renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 $('game').appendChild(renderer.domElement);
 const scene = new THREE.Scene();
@@ -25,27 +29,33 @@ const camera = new THREE.PerspectiveCamera(BASE_FOV, innerWidth / innerHeight, 0
 camera.rotation.order = 'YXZ';
 scene.add(camera);
 const { colliders } = buildWorld(scene, renderer);
-addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
+addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); weaponCamera.aspect = camera.aspect; weaponCamera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
 
-// ---------- First-person weapon (view model) ----------
-const gun = new THREE.Group();
+// ---------- First-person weapon (own scene + camera so it never clips into walls) ----------
+const weaponScene = new THREE.Scene();
+const weaponCamera = new THREE.PerspectiveCamera(54, innerWidth / innerHeight, 0.01, 5);
 {
-  const metal = new THREE.MeshLambertMaterial({ color: '#2b2b2b' }), wood = new THREE.MeshLambertMaterial({ color: '#6b4a2a' });
-  const add = (geo, m, x, y, z) => { const me = new THREE.Mesh(geo, m); me.position.set(x, y, z); gun.add(me); return me; };
-  add(new THREE.BoxGeometry(0.07, 0.09, 0.42), metal, 0, 0, -0.05);
-  add(new THREE.BoxGeometry(0.075, 0.07, 0.22), wood, 0, -0.01, -0.3);          // handguard
-  add(new THREE.CylinderGeometry(0.012, 0.012, 0.22, 8).rotateX(Math.PI / 2), metal, 0, 0.015, -0.5);
-  add(new THREE.BoxGeometry(0.05, 0.16, 0.07), metal, 0, -0.11, -0.12).rotation.x = 0.35; // curved mag
-  add(new THREE.BoxGeometry(0.045, 0.11, 0.05), wood, 0, -0.09, 0.06).rotation.x = -0.3;  // grip
-  add(new THREE.BoxGeometry(0.06, 0.08, 0.22), wood, 0, -0.03, 0.25);            // stock
-  add(new THREE.BoxGeometry(0.02, 0.035, 0.02), metal, 0, 0.06, -0.42);          // front sight
-  add(new THREE.BoxGeometry(0.04, 0.03, 0.03), metal, 0, 0.055, 0.08);           // rear sight
+  const pm = new THREE.PMREMGenerator(renderer);
+  const env = pm.fromScene(new RoomEnvironment(), 0.04).texture;
+  weaponScene.environment = env; weaponScene.environmentIntensity = 0.55;
+  scene.environment = env; scene.environmentIntensity = 0.35; // only affects PBR (the third-person rifles)
 }
-const muzzleFlash = new THREE.Mesh(new THREE.PlaneGeometry(0.22, 0.22), new THREE.MeshBasicMaterial({ color: '#ffcf6b', transparent: true, opacity: 0.95, side: THREE.DoubleSide, depthWrite: false }));
-muzzleFlash.position.set(0, 0.015, -0.66); muzzleFlash.visible = false; gun.add(muzzleFlash);
-const muzzleLight = new THREE.PointLight('#ffbb55', 0, 8); muzzleLight.position.set(0, 0.02, -0.7); gun.add(muzzleLight);
-const HIP = new THREE.Vector3(0.2, -0.21, -0.45), ADS = new THREE.Vector3(0, -0.068, -0.32);
-gun.scale.setScalar(0.8); gun.position.copy(HIP); camera.add(gun);
+weaponScene.add(new THREE.HemisphereLight('#dfeaff', '#7a5234', 0.9));
+const keyLight = new THREE.DirectionalLight('#fff0d6', 2.4); keyLight.position.set(-0.5, 1, 0.35); weaponScene.add(keyLight);
+const rimLight = new THREE.DirectionalLight('#a8c8ff', 1.2); rimLight.position.set(1, 0.25, -0.8); weaponScene.add(rimLight);
+const flashLightVM = new THREE.PointLight('#ffb050', 0, 1.2, 2); flashLightVM.position.set(0.05, 0, -0.75); weaponScene.add(flashLightVM);
+const rig = new THREE.Group(); weaponScene.add(rig);
+const rifle = buildRifle('high'); rig.add(rifle);
+const RU = rifle.userData;
+const flashMat = new THREE.MeshBasicMaterial({ map: flashTexture(), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+const muzzleFlash = new THREE.Group(); muzzleFlash.visible = false; RU.muzzle.add(muzzleFlash);
+muzzleFlash.add(new THREE.Mesh(new THREE.PlaneGeometry(0.15, 0.15), flashMat));
+for (const rz of [0, Math.PI / 2]) { const m = new THREE.Mesh(new THREE.PlaneGeometry(0.07, 0.22).rotateX(-Math.PI / 2).translate(0, 0, -0.1), flashMat); m.rotation.z = rz; muzzleFlash.add(m); }
+const muzzleLight = new THREE.PointLight('#ffbb55', 0, 9); muzzleLight.position.set(0.1, -0.05, -1); camera.add(muzzleLight);
+const HIP = new THREE.Vector3(0.2, -0.185, -0.46);
+const ADS = new THREE.Vector3(-RU.sight.x, -RU.sight.y, -0.2 - RU.sight.z); // red-dot centred on screen
+const anim = { swayX: 0, swayY: 0, kick: 0, kickRot: 0, bobT: 0, aimK: 0, flashT: 0 };
+rig.position.copy(HIP);
 
 // ---------- State ----------
 const me = {
@@ -65,7 +75,7 @@ function connect(name) {
   ws.onopen = () => ws.send(JSON.stringify({ t: 'join', name }));
   ws.onclose = () => { $('status').textContent = 'Disconnected from server. Refresh to rejoin.'; showMenu(); joined = false; };
   ws.onerror = () => { $('status').textContent = 'Could not connect to the game server.'; };
-  ws.onmessage = ev => { const m = JSON.parse(ev.data); handlers[m.t]?.(m); };
+  ws.onmessage = ev => { const m = JSON.parse(ev.data); if (comms.handle(m)) return; handlers[m.t]?.(m); };
 }
 const net = m => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(m)); };
 
@@ -74,7 +84,9 @@ const handlers = {
     me.id = m.id; me.seq = m.seq; winKills = m.win; roster = m.list; roundOver = m.roundOver;
     me.pos.set(...m.p); me.yaw = m.yaw; me.alive = true; me.hp = MAX_HP;
     joined = true; $('menu').classList.add('hidden'); $('hud').classList.remove('hidden'); $('sbwin').textContent = winKills;
-    updateScore(); feedSys(`Welcome to ${MAP_NAME}, ${nameOf(me.id)}!`);
+    updateScore(); comms.chatLine('', `Welcome to ${MAP_NAME}, ${nameOf(me.id)}! Press T to chat, hold V to talk.`, 'sys');
+    for (const r of roster) if (r.talk) comms.talking.add(r.id);
+    comms.connectVoice(m.list);
   },
   roster(m) { roster = m.list; winKills = m.win; for (const r of roster) remotes.get(r.id)?.s.setName(r.name); updateScore(); renderScoreboard(); },
   s(m) {
@@ -86,7 +98,7 @@ const handlers = {
       if (!r) {
         const info = roster.find(p => p.id === id) || {};
         r = { s: new Soldier(id, info.name || `#${id}`, info.c), buf: [], speed: 0, last: new THREE.Vector3(x, y, z) };
-        scene.add(r.s.root); remotes.set(id, r); r.s.root.position.set(x, y, z);
+        scene.add(r.s.root); remotes.set(id, r); r.s.root.position.set(x, y, z); r.s.setSpeaking(comms.talking.has(id));
       }
       r.buf.push({ t: now, x, y, z, yaw, pitch });
       if (r.buf.length > 40) r.buf.shift();
@@ -136,7 +148,7 @@ const handlers = {
     renderScoreboard(); $('scoreboard').classList.remove('hidden'); if (m.wid === me.id) sfx.win();
   },
   roundStart() { roundOver = false; $('roundend').classList.add('hidden'); $('scoreboard').classList.add('hidden'); center('NEW ROUND — FIGHT!'); },
-  feed(m) { feedSys(m.msg); },
+  feed(m) { comms.chatLine('', m.msg, 'sys'); },
   leave(m) { const r = remotes.get(m.id); if (r) { scene.remove(r.s.root); remotes.delete(m.id); } },
 };
 
@@ -154,8 +166,16 @@ function updateScore() {
 }
 function renderScoreboard() {
   $('sbbody').innerHTML = [...roster].sort((a, b) => b.k - a.k || a.d - b.d).map(r =>
-    `<tr class="${r.id === me.id ? 'me' : ''}"><td class="${r.bot ? 'bot' : ''}">${esc(r.name)}</td><td>${r.k}</td><td>${r.d}</td><td>${(r.k / Math.max(1, r.d)).toFixed(2)}</td></tr>`).join('');
+    `<tr class="${r.id === me.id ? 'me' : ''}"><td class="spk">${comms.talking.has(r.id) ? '🔊' : ''}</td><td class="${r.bot ? 'bot' : ''}">${esc(r.name)}</td><td>${r.k}</td><td>${r.d}</td><td>${(r.k / Math.max(1, r.d)).toFixed(2)}</td>` +
+    `<td>${r.bot || r.id === me.id ? '' : `<button class="mute ${comms.muted.has(r.id) ? 'on' : ''}" data-id="${r.id}">${comms.muted.has(r.id) ? '🔇 Muted' : '🔈 Mute'}</button>`}</td></tr>`).join('');
 }
+
+// ---------- Comms (text + voice chat) ----------
+comms.initComms({
+  net: m => net(m), myId: () => me.id, nameOf,
+  onTalkChange: (id, on) => { remotes.get(id)?.s.setSpeaking(on); if (!$('scoreboard').classList.contains('hidden')) renderScoreboard(); },
+});
+$('sbbody').addEventListener('click', e => { const b = e.target.closest('button.mute'); if (!b) return; comms.toggleMute(Number(b.dataset.id)); renderScoreboard(); });
 
 // ---------- Input ----------
 function showMenu() { $('menu').classList.remove('hidden'); $('hud').classList.add('hidden'); }
@@ -166,7 +186,12 @@ function join() {
 $('play').onclick = join;
 $('name').addEventListener('keydown', e => { if (e.key === 'Enter') join(); });
 function lock() { try { const p = renderer.domElement.requestPointerLock(); p?.catch?.(() => {}); } catch {} }
-document.addEventListener('pointerlockchange', () => { locked = document.pointerLockElement === renderer.domElement; if (!locked) mouseDown = false; });
+document.addEventListener('pointerlockchange', () => {
+  const was = locked; locked = document.pointerLockElement === renderer.domElement;
+  const sb = $('scoreboard');
+  if (!locked) { mouseDown = false; aiming = false; if (was && joined) { renderScoreboard(); sb.classList.remove('hidden'); sb.classList.add('interactive'); } }
+  else { sb.classList.remove('interactive'); if (!roundOver) sb.classList.add('hidden'); }
+});
 renderer.domElement.addEventListener('mousedown', e => {
   if (!joined) return; sfx.init();
   if (!locked) { lock(); return; }
@@ -179,13 +204,17 @@ addEventListener('mousemove', e => {
   if (!locked || !me.alive) return;
   const sens = 0.0022 * (aiming ? 0.6 : 1);
   me.yaw -= e.movementX * sens; me.pitch = Math.max(-1.5, Math.min(1.5, me.pitch - e.movementY * sens));
+  anim.swayX = Math.max(-0.04, Math.min(0.04, anim.swayX + e.movementX * 0.00006)); anim.swayY = Math.max(-0.04, Math.min(0.04, anim.swayY + e.movementY * 0.00006));
 });
 addEventListener('keydown', e => {
+  if (comms.isChatting()) return;
+  if (joined && (e.code === 'KeyT' || e.code === 'Enter')) { e.preventDefault(); for (const k in keys) keys[k] = false; mouseDown = false; comms.openChat(); return; }
+  if (joined && e.code === 'KeyV') { if (!e.repeat) comms.pttDown(); return; }
   if (e.code === 'Tab') { e.preventDefault(); if (joined) { renderScoreboard(); $('scoreboard').classList.remove('hidden'); } return; }
   keys[e.code] = true;
   if (e.code === 'KeyR') startReload();
 });
-addEventListener('keyup', e => { keys[e.code] = false; if (e.code === 'Tab' && !roundOver) $('scoreboard').classList.add('hidden'); });
+addEventListener('keyup', e => { keys[e.code] = false; if (e.code === 'KeyV') comms.pttUp(); if (e.code === 'Tab' && !roundOver && locked) $('scoreboard').classList.add('hidden'); });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; mouseDown = false; });
 
 // ---------- Physics & collision ----------
@@ -247,6 +276,13 @@ function startReload() {
   if (!me.alive || me.reloading || me.ammo === MAG_SIZE || me.reserve <= 0) return;
   me.reloading = true; me.reloadEnd = performance.now() + RELOAD_MS; sfx.reload();
 }
+// The view model has its own camera/FOV: project its muzzle to the screen, then back into the world.
+function muzzleWorld() {
+  rig.updateMatrixWorld(true);
+  const p = RU.muzzle.getWorldPosition(new THREE.Vector3()).project(weaponCamera);
+  const v = new THREE.Vector3(p.x, p.y, 0.5).unproject(camera).sub(camera.position).normalize();
+  return camera.position.clone().addScaledVector(v, 0.8);
+}
 function shoot(now, moving) {
   if (!me.alive || roundOver || me.reloading || now - me.lastShot < FIRE_INTERVAL) return;
   if (me.ammo <= 0) { startReload(); return; }
@@ -262,13 +298,48 @@ function shoot(now, moving) {
   const pid = hit?.object.userData.pid || 0, head = hit?.object.userData.part === 'head';
   net({ t: 'shoot', o: origin.toArray(), d: dir.toArray(), e: end.toArray(), hit: pid, head });
   // effects
-  const tip = muzzleFlash.getWorldPosition(new THREE.Vector3());
+  const tip = muzzleWorld();
   tracer(tip, end); if (hit) { spark(end, pid ? '#b01515' : '#ffd27a'); if (!pid) sfx.impact(); }
-  muzzleFlash.visible = true; muzzleFlash.rotation.z = Math.random() * 3; muzzleLight.intensity = 6;
-  setTimeout(() => { muzzleFlash.visible = false; muzzleLight.intensity = 0; }, 45);
+  muzzleFlash.visible = true; muzzleFlash.rotation.z = Math.random() * Math.PI; muzzleFlash.scale.setScalar(0.8 + Math.random() * 0.5);
+  anim.flashT = 0.04; muzzleLight.intensity = 7; flashLightVM.intensity = 4;
   me.recoil = Math.min(0.12, me.recoil + (aiming ? 0.012 : 0.02)); me.yaw += (Math.random() - 0.5) * 0.006;
-  gun.position.z += 0.05;
+  anim.kick += aiming ? 0.018 : 0.03; anim.kickRot += aiming ? 0.025 : 0.05; anim.swayX += (Math.random() - 0.5) * 0.006;
   sfx.shot(1, 0);
+}
+
+// ---------- View-model animation: sway, bob, recoil, reload ----------
+const clamp01 = v => Math.max(0, Math.min(1, v));
+const ease = t => t * t * (3 - 2 * t);
+function updateViewModel(dt, now, hs) {
+  anim.aimK += ((aiming && me.alive && !me.reloading ? 1 : 0) - anim.aimK) * Math.min(1, dt * 12);
+  const k = anim.aimK;
+  anim.swayX *= Math.exp(-dt * 7); anim.swayY *= Math.exp(-dt * 7);
+  anim.kick *= Math.exp(-dt * 16); anim.kickRot *= Math.exp(-dt * 12);
+  if (anim.flashT > 0) { anim.flashT -= dt; if (anim.flashT <= 0) { muzzleFlash.visible = false; muzzleLight.intensity = 0; flashLightVM.intensity = 0; } }
+  const moving = me.onGround && hs > 0.5;
+  if (moving) anim.bobT += dt * hs * 1.25;
+  const amp = (moving ? Math.min(1, hs / 6) : 0) * (1 - k * 0.85);
+  const breathe = Math.sin(now / 1000 * 1.6) * 0.0015 * (1 - k * 0.7);
+  // reload choreography
+  let rx = 0, rz = 0, ry = 0, drop = 0, magRot = 0, charge = 0;
+  if (me.reloading) {
+    const p = clamp01(1 - (me.reloadEnd - now) / RELOAD_MS);
+    const tilt = ease(clamp01(p / 0.15)) * ease(clamp01((1 - p) / 0.15));
+    rx = 0.22 * tilt; rz = 0.5 * tilt; ry = -0.03 * tilt;
+    if (p < 0.38) { const t = ease(clamp01((p - 0.15) / 0.2)); drop = t; magRot = t * 0.5; }
+    else if (p < 0.5) { drop = 1; magRot = 0.5; }
+    else { const t = ease(clamp01((p - 0.5) / 0.18)); drop = 1 - t; magRot = 0.5 * (1 - t); }
+    if (p > 0.72 && p < 0.86) charge = Math.sin(Math.PI * (p - 0.72) / 0.14);
+  }
+  RU.mag.position.set(RU.magRest.x, RU.magRest.y - drop * 0.28, RU.magRest.z + drop * 0.05);
+  RU.mag.rotation.x = magRot; RU.mag.visible = drop < 0.99;
+  RU.charge.position.set(RU.chargeRest.x, RU.chargeRest.y, RU.chargeRest.z + charge * 0.06);
+  const base = tmpV.copy(HIP).lerp(ADS, k);
+  rig.position.set(
+    base.x + Math.sin(anim.bobT) * 0.009 * amp - anim.swayX * 0.5,
+    base.y - Math.abs(Math.cos(anim.bobT)) * 0.008 * amp + anim.swayY * 0.5 + breathe + ry,
+    base.z + anim.kick);
+  rig.rotation.set(anim.kickRot + anim.swayY * 1.2 + rx + 0.04 * (1 - k), -anim.swayX * 1.5 + 0.16 * (1 - k), rz + Math.sin(anim.bobT) * 0.01 * amp);
 }
 
 // ---------- Main loop ----------
@@ -289,17 +360,15 @@ function frame(now) {
       const bob = me.onGround ? Math.sin(now / 1000 * hs * 1.7) * Math.min(1, hs / 8) * 0.04 : 0;
       camera.position.set(me.pos.x, me.pos.y + EYE_HEIGHT + bob, me.pos.z);
       camera.rotation.set(me.pitch + me.recoil, me.yaw, 0);
-      gun.visible = true;
+      rig.visible = true;
     } else {
       camera.position.y += (me.pos.y + 0.4 - camera.position.y) * Math.min(1, dt * 4);
       camera.rotation.z += (0.5 - camera.rotation.z) * Math.min(1, dt * 3);
-      gun.visible = false;
+      rig.visible = false;
     }
     const targetFov = aiming && me.alive ? ADS_FOV : BASE_FOV;
     if (Math.abs(camera.fov - targetFov) > 0.1) { camera.fov += (targetFov - camera.fov) * Math.min(1, dt * 12); camera.updateProjectionMatrix(); }
-    const gunTarget = aiming ? ADS : HIP;
-    gun.position.lerp(tmpV.copy(gunTarget).add(new THREE.Vector3(0, me.reloading ? -0.15 : 0, 0)), Math.min(1, dt * 14));
-    gun.rotation.x = me.reloading ? -0.5 : 0;
+    updateViewModel(dt, now, hs);
     // network state @ 30Hz
     sendAcc += dt;
     if (sendAcc >= 1 / 30 && me.alive) { sendAcc = 0; net({ t: 'st', p: me.pos.toArray().map(v => Math.round(v * 100) / 100), yaw: me.yaw, pitch: me.pitch, seq: me.seq }); }
@@ -336,10 +405,12 @@ function frame(now) {
   }
   for (let i = tracers.length - 1; i >= 0; i--) { const tr = tracers[i]; tr.life -= dt; tr.m.material.opacity = Math.max(0, tr.life / 0.08) * 0.85; if (tr.life <= 0) { scene.remove(tr.m); tr.m.material.dispose(); tracers.splice(i, 1); } }
   for (let i = sparks.length - 1; i >= 0; i--) { const s = sparks[i]; s.life -= dt; s.m.material.opacity = s.life / 0.25; s.m.scale.setScalar(1 + (0.25 - s.life) * 4); if (s.life <= 0) { scene.remove(s.m); s.m.material.dispose(); sparks.splice(i, 1); } }
+  renderer.clear();
   renderer.render(scene, camera);
+  if (joined && rig.visible) { renderer.clearDepth(); renderer.render(weaponScene, weaponCamera); }
 }
 requestAnimationFrame(frame);
 
 // Test hook: ?autojoin=Name joins immediately (used for headless screenshots)
 if (params.has('autojoin')) { $('name').value = params.get('autojoin') || 'Tester'; join(); }
-window.__game = { me, remotes, get joined() { return joined; } };
+window.__game = { me, remotes, comms, anim, rifle, setAim: v => (aiming = v), reload: () => startReload(), fire: () => { me.lastShot = 0; shoot(performance.now(), false); }, get joined() { return joined; } };

@@ -17,12 +17,13 @@ const TICK_HZ = 20;
 const ROUND_RESET_MS = 8000;
 
 const app = express();
+app.use('/vendor/jsm', express.static(path.join(__dirname, 'node_modules/three/examples/jsm'), { maxAge: '7d' }));
 app.use('/vendor/three', express.static(path.join(__dirname, 'node_modules/three/build'), { maxAge: '7d' }));
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/health', (_req, res) => res.json({ ok: true, players: [...players.values()].filter(p => !p.bot).length }));
 
 const server = http.createServer(app);
-const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 16 * 1024 });
+const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 64 * 1024 });
 
 const COLORS = ['#4f6b3a', '#6b5a3a', '#3a5a6b', '#5a3a3a', '#55553a', '#3a3a5a', '#6b4a2a', '#2f4f4f'];
 const BOT_NAMES = ['Ghost', 'Soap', 'Price', 'Roach', 'Gaz', 'Nikolai', 'Yuri', 'Makarov'];
@@ -37,7 +38,7 @@ function broadcast(m, except) {
   const s = JSON.stringify(m);
   for (const p of players.values()) if (p.ws && p !== except && p.ws.readyState === 1) p.ws.send(s);
 }
-const roster = () => [...players.values()].map(p => ({ id: p.id, name: p.name, k: p.kills, d: p.deaths, bot: !!p.bot, c: p.color }));
+const roster = () => [...players.values()].map(p => ({ id: p.id, name: p.name, k: p.kills, d: p.deaths, bot: !!p.bot, c: p.color, talk: !!p.talking }));
 const sendRoster = () => broadcast({ t: 'roster', list: roster(), win: WIN_KILLS });
 const humans = () => [...players.values()].filter(p => !p.bot).length;
 const eye = p => [p.p[0], p.p[1] + EYE_HEIGHT, p.p[2]];
@@ -169,7 +170,21 @@ wss.on('connection', ws => {
         }
       }
     } else if (m.t === 'chat' && typeof m.msg === 'string') {
-      broadcast({ t: 'feed', msg: `${me.name}: ${m.msg.slice(0, 80)}` });
+      // rate limit: >= 600 ms apart and at most 6 messages per 10 s
+      const now = Date.now();
+      me.chatTimes = (me.chatTimes || []).filter(t => now - t < 10000);
+      if (me.chatTimes.length >= 6 || now - (me.chatTimes.at(-1) || 0) < 600) { send(ws, { t: 'chat', id: 0, name: '', msg: 'You are sending messages too fast.' }); return; }
+      const msg = m.msg.replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 120);
+      if (!msg) return;
+      me.chatTimes.push(now);
+      broadcast({ t: 'chat', id: me.id, name: me.name, msg });
+    } else if (m.t === 'rtc') {
+      // WebRTC signalling relay (SDP offers/answers + ICE candidates) between human players
+      const to = players.get(m.to);
+      if (to && to.ws && to !== me && m.data && typeof m.data === 'object') send(to.ws, { t: 'rtc', from: me.id, data: m.data });
+    } else if (m.t === 'talk') {
+      me.talking = !!m.on;
+      broadcast({ t: 'talk', id: me.id, on: me.talking }, me);
     }
   });
   ws.on('close', () => { if (me) removePlayer(me); });

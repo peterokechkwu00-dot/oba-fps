@@ -53,3 +53,17 @@ h1 { margin: 0; font-size: 56px; letter-spacing: 10px; color: #c9e265; text-shad
 #scoreboard tr.me td { color: #c9e265; font-weight: bold; }
 #scoreboard td.bot { color: #9aa; }
 .sbhint { margin-top: 10px; font-size: 13px; color: #888; }
+
+#chat { position: absolute; left: 24px; bottom: 84px; width: 420px; pointer-events: none; }
+#chatlog { max-height: 200px; overflow: hidden; display: flex; flex-direction: column; gap: 2px; font-size: 14px; }
+#chatlog .line { background: rgba(0,0,0,.45); padding: 3px 8px; border-radius: 4px; transition: opacity 1s; text-shadow: 0 1px 2px #000; word-wrap: break-word; }
+#chatlog .line b { color: #ffcc66; } #chatlog .line.me b { color: #c9e265; } #chatlog .line.sys { color: #9ad; font-style: italic; }
+#chatlog .line.old { opacity: 0; }
+#chat.open #chatlog { overflow-y: auto; } #chat.open #chatlog .line.old { opacity: .85; }
+#chatinput { pointer-events: auto; width: 100%; margin-top: 4px; padding: 8px 10px; background: rgba(0,0,0,.7); color: #fff; border: 1px solid #6f8f2a; border-radius: 4px; font-size: 14px; outline: none; }
+#talkind { position: absolute; left: 24px; bottom: 300px; background: rgba(120,20,20,.75); padding: 5px 12px; border-radius: 4px; font-weight: bold; font-size: 13px; letter-spacing: 1px; }
+#scoreboard.interactive { pointer-events: auto; }
+#scoreboard td.spk { width: 22px; } #scoreboard button.mute { background: #333; color: #fff; border: 1px solid #555; border-radius: 4px; cursor: pointer; padding: 2px 8px; }
+#scoreboard button.mute.on { background: #7a1f1f; }
+#settings { margin-top: 12px; display: flex; gap: 18px; align-items: center; flex-wrap: wrap; font-size: 13px; color: #ccc; }
+#settings .hint { color: #888; }
