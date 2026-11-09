@@ -49,6 +49,11 @@ export function setTouchVisible(on) {
 }
 
 export function setAiming(on) { $('btnAim')?.classList.toggle('on', !!on); }
+export function setEnterVisible(show, exiting) {
+  const b = $('btnEnter'); if (!b) return;
+  b.classList.toggle('hidden', !show);
+  b.textContent = exiting ? 'EXIT' : 'ENTER';
+}
 export function refreshMic(mic) {
   const b = $('btnMic'); if (!b || !mic) return;
   b.textContent = mic.denied ? '⚠️' : (mic.micOn ? '🎤' : '🔇');
@@ -149,6 +154,7 @@ function wireButtons() {
   bindHold($('btnMic'), () => { opts.onMic?.(); });
   bindHold($('btnChat'), () => opts.onChat?.());
   bindHold($('btnScore'), () => opts.onScore?.());
+  bindHold($('btnEnter'), () => opts.onEnter?.());
   $('sbclose')?.addEventListener('click', () => opts.onScoreClose?.());
 }
 

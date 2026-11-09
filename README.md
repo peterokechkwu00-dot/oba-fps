@@ -17,6 +17,13 @@ interior rooms, floors and ceilings, stairs up to upper floors and roofs, and si
 shelves, counters, crates). You can see and shoot through windows and doors; walls still stop bullets.
 A few pickups sit inside. Bots stay on the ground floor so they do not get stuck on stairs.
 
+**Keke, saloon cars and danfo buses** are parked on every map (motor park, roads, factory yard,
+barracks). Walk up to one and press **E** (or the on-screen **ENTER** button on a phone) to get in.
+The first seat is the driver; extra seats are passengers. While you drive, the camera sits behind
+the vehicle; WASD (or the joystick) steers and accelerates, **H** honks. Passengers can look
+around and shoot. Vehicles have health, start smoking when damaged, then explode (hurting anyone
+nearby) and respawn after about 45 seconds. A vehicle moving fast will run enemies over.
+
 Most textures, signboards and sounds are generated in code. Third-person soldiers use a bundled Mixamo glTF.
 
 ## Run locally
@@ -39,6 +46,7 @@ Other people on your network can join at `http://<your-ip>:3000`.
 | `MED_RESPAWN`  | 20000   | Medkit respawn time (ms)                               |
 | `ARM_RESPAWN`  | 30000   | Armour vest respawn time (ms)                          |
 | `AMMO_RESPAWN` | 15000   | Ammo crate respawn time (ms)                           |
+| `VEH_RESPAWN`  | 45000   | Destroyed vehicle respawn time (ms)                    |
 
 ## Controls
 
@@ -54,6 +62,8 @@ Other people on your network can join at `http://<your-ip>:3000`.
 | Tab (hold) | Scoreboard (+ voice mute buttons) |
 | T or Enter | Text chat (Enter sends, Esc cancels) |
 | V | Mute / unmute your microphone (voice is open-mic by default) |
+| E | Enter or exit a nearby keke, car or danfo |
+| H | Horn (while in a vehicle) |
 
 ### On a phone or tablet
 After you tap **DEPLOY**, on-screen controls appear (no mouse lock). Rotate to landscape if you can — there is a dismissable hint.
@@ -176,6 +186,8 @@ a tie is broken at random. The current map name is shown in the HUD, the menu an
 - `public/shared/maps.js`: registry of every map, loaded by id. Each map owns its collision boxes, spawns,
   pickups, enterable interiors and bot-navigable layout.
 - `public/shared/interior.js`: helper that hollows a building into walls, floors, stairs, props and lights.
+- `public/shared/vehicles.js`: keke / car / danfo types, map spawns and arcade physics.
+- `public/drive.js`: client vehicle meshes, interpolation, smoke and explosions.
 - `public/shared/map-oba.js`, `map-onitsha.js`, `map-nnewi.js`, `map-awka.js`: the four arenas.
 - `public/shared/layout.js`: shared helpers and gameplay constants.
 - `public/world.js`: builds (and rebuilds) the 3D scene and canvas textures for the active map.

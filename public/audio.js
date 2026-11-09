@@ -56,3 +56,35 @@ export function pickup(kind) {
   seq.forEach((f, i) => tone(t + i * 0.06, 0.14, 'triangle', f, f * 1.05, 0.22));
 }
 export function toast() { /* reserved */ }
+
+let engineOsc = null, engineGain = null, engineFilt = null;
+export function engine(amount) {
+  if (!ctx) return;
+  if (amount <= 0.02) {
+    if (engineGain) { const t = ctx.currentTime; engineGain.gain.cancelScheduledValues(t); engineGain.gain.setTargetAtTime(0.0001, t, 0.08); }
+    return;
+  }
+  if (!engineOsc) {
+    engineOsc = ctx.createOscillator(); engineOsc.type = 'sawtooth';
+    engineFilt = ctx.createBiquadFilter(); engineFilt.type = 'lowpass'; engineFilt.frequency.value = 400;
+    engineGain = ctx.createGain(); engineGain.gain.value = 0.0001;
+    engineOsc.connect(engineFilt); engineFilt.connect(engineGain); engineGain.connect(master);
+    engineOsc.start();
+  }
+  const t = ctx.currentTime;
+  engineOsc.frequency.setTargetAtTime(55 + amount * 90, t, 0.08);
+  engineFilt.frequency.setTargetAtTime(300 + amount * 800, t, 0.08);
+  engineGain.gain.setTargetAtTime(0.04 + amount * 0.08, t, 0.08);
+}
+export function horn() {
+  if (!ok()) return;
+  const t = ctx.currentTime;
+  tone(t, 0.35, 'square', 420, 400, 0.28);
+  tone(t, 0.35, 'square', 560, 530, 0.2);
+}
+export function explode() {
+  if (!ok()) return;
+  const t = ctx.currentTime;
+  noise(t, 0.55, 'lowpass', 400, 0.7, 0.7);
+  tone(t, 0.4, 'sawtooth', 180, 40, 0.35);
+}

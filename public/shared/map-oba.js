@@ -4,8 +4,7 @@ import { createLayout } from './layout.js';
 export function buildOba() {
   const L = createLayout('oba', 'Oba, Anambra', { sky: '#9ccbe8', fog: '#cfe2ea', ground: 'laterite' });
   const { box, shop, enterable, pickup, N, S, E, W, ROADS, DIRT, PALMS, UMBRELLAS, BILLBOARDS, CANOPIES } = L;
-  function keke(x, z, alongX = false) { return box(x, z, alongX ? 2.6 : 1.4, alongX ? 1.4 : 2.6, 1.7, 'keke', 0, { rot: alongX ? 1 : 0 }); }
-  function danfo(x, z, alongX = false) { return box(x, z, alongX ? 5.5 : 2.2, alongX ? 2.2 : 5.5, 2.4, 'danfo', 0, { rot: alongX ? 1 : 0 }); }
+  // Parked keke/danfo used to be solid props; they are now drivable (public/shared/vehicles.js).
 
 // Perimeter compound walls
 box(0, -40.5, 82, 1, 5, 'wall');
@@ -48,8 +47,7 @@ shop(-6.5, 30, 2.5, 2.5, 'SUYA SPOT', E, '#bf360c', '#fff', '#ffe0b2', 2.6);
 
 // ---- NW: Oba Motor Park ----
 DIRT.push({ x: -17, z: -24, w: 24, d: 26 });
-danfo(-24, -20); danfo(-19.5, -20); danfo(-12, -31, true);
-keke(-26, -31); keke(-23.5, -31); keke(-21, -31); keke(-10, -21); keke(-14, -24.5, true);
+// Motor-park vehicles are spawned as drivable keke / danfo / cars.
 box(-8.5, -33, 1.2, 1.2, 1.2, 'crate'); box(-8.5, -34.4, 1.2, 1.2, 1.2, 'crate');
 shop(-27, -12.5, 3, 2.5, 'TICKETS • ONITSHA/OWERRI', S, '#004d40', '#ffeb3b', '#dcedc8', 2.6);
 box(-22, -11, 0.25, 0.25, 4, 'pole'); box(-12, -11, 0.25, 0.25, 4, 'pole');
@@ -121,13 +119,7 @@ box(20.5, 22, 6, 0.3, 2, 'fence');
 box(10, 22, 1.4, 1.4, 1.4, 'crate'); box(20, 36.5, 1.3, 1.3, 1.3, 'crate');
 PALMS.push({ x: 38, z: 37, h: 8.5 }, { x: 22, z: 37.5, h: 7.5 }, { x: 7, z: 36, h: 8 }, { x: 38, z: 24, h: 7 });
 
-// ---- Vehicles & cover on the roads ----
-danfo(-17, 2.4, true);
-keke(14, -2.4, true);
-keke(26, 2.6, true);
-keke(-31, -2.5, true);
-keke(2, -24);
-danfo(-1.6, 27);
+// ---- Cover on the roads (drivable vehicles spawn separately) ----
 box(33, -1.5, 1.2, 1.2, 1.0, 'crate'); box(-8, 2.5, 1.2, 1.2, 1.2, 'crate');
 box(2.6, 12, 1, 1, 1, 'crate'); box(-2.5, -12, 1, 1, 1, 'crate');
 

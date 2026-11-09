@@ -6,6 +6,7 @@ import { spawn as spawnProc } from 'child_process';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import { getMap, listMaps, rayMap, standHeight, PLAYER_RADIUS as PR, PLAYER_HEIGHT as PH, DEFAULT_MAP } from '../public/shared/map.js';
+import { vehicleSpawns, firstFreeSeat, createVehicle, VEHICLE_TYPES } from '../public/shared/vehicles.js';
 
 const URL = process.argv[2] || `ws://localhost:${process.env.PORT || 3000}/ws`;
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -330,6 +331,96 @@ try {
     a.send({ t: 'shoot', o: o3, d: d3.map(v => v / l3), e: [-22, 1.15, -38], hit: b.id, head: false });
     await sleep(400);
     check(a.msgs.filter(m => m.t === 'hit').length === nHit, 'shot through Onitsha warehouse was rejected (per-map collision)');
+    a.ws.close(); b.ws.close();
+  });
+} catch (e) { ok = false; log('ERROR', e.message); }
+
+
+log('--- vehicles ---');
+try {
+  for (const { id } of listMaps()) {
+    const sp = vehicleSpawns(id);
+    const kinds = new Set(sp.map(s => s.type));
+    check(sp.length >= 4, `${id}: ${sp.length} vehicle spawns`);
+    check(kinds.has('keke') && kinds.has('car') && kinds.has('danfo'), `${id}: has keke, car and danfo`);
+    const blocked = sp.filter(s => {
+      const m = getMap(id);
+      return m.AABBS.some(a =>
+        s.x > a.min[0] && s.x < a.max[0] && s.z > a.min[2] && s.z < a.max[2] && a.min[1] <= 0.2 && a.max[1] > 0.6);
+    });
+    check(blocked.length === 0, `${id}: vehicle spawns are not inside solid volumes` + (blocked.length ? ` (${JSON.stringify(blocked)})` : ''));
+  }
+  const keke = createVehicle(1, { type: 'keke', x: 0, z: 0, yaw: 0 });
+  check(firstFreeSeat(keke) === 0, 'empty keke offers the driver seat');
+  keke.seats[0] = 1; keke.seats[1] = 2; keke.seats[2] = 3;
+  check(firstFreeSeat(keke) === -1, 'a full keke (3 seats) rejects another rider');
+  check(VEHICLE_TYPES.car.seats === 4 && VEHICLE_TYPES.danfo.seats === 6, 'car seats 4, danfo seats 6');
+
+  await withTestServer({
+    PORT: 3195, BOTS: 0, WIN_KILLS: 50, VOTE_MS: 15000, MAP: 'oba', VEH_RESPAWN: 600,
+  }, async (url) => {
+    const a = client('Alpha', url), b = client('Bravo', url);
+    await Promise.all([a.open, b.open]);
+    a.send({ t: 'join', name: 'Alpha' }); b.send({ t: 'join', name: 'Bravo' });
+    const wa = await a.wait(m => m.t === 'welcome');
+    await b.wait(m => m.t === 'welcome');
+    check(Array.isArray(wa.vehicles) && wa.vehicles.length >= 4, `welcome includes ${wa.vehicles?.length} vehicles`);
+    const types = new Set((wa.vehicles || []).map(v => v[1]));
+    check(types.has(0) && types.has(1) && types.has(2), 'welcome vehicles include keke, car and danfo');
+
+    const kekeRow = wa.vehicles.find(v => v[1] === 0);
+    const carRow = wa.vehicles.find(v => v[1] === 1);
+    check(!!kekeRow && !!carRow, 'found a keke and a car to test');
+    const kx = kekeRow[2], kz = kekeRow[4], kid = kekeRow[0];
+    const stand = async (c, p, n = 8) => { for (let i = 0; i < n; i++) { pos(c, p); await sleep(40); } };
+
+    await stand(a, [kx + 1.6, 0, kz]);
+    a.send({ t: 'enter', id: kid });
+    const en = await a.wait(m => m.t === 'venter', 3000);
+    check(en.ok && en.seat === 0, `Alpha enters the keke as driver (ok=${en.ok}, seat=${en.seat})`);
+
+    await stand(b, [kx - 1.6, 0, kz]);
+    b.send({ t: 'enter', id: kid });
+    const en2 = await b.wait(m => m.t === 'venter', 3000);
+    check(en2.ok && en2.seat === 1, `Bravo enters as passenger (ok=${en2.ok}, seat=${en2.seat})`);
+
+    const snap = await a.wait(m => m.t === 's' && m.vs?.some(v => v[0] === kid && v[8] === a.id && v[9] === b.id), 3000);
+    check(!!snap, 'snapshot lists both occupants in the keke seats');
+
+    a.send({ t: 'drive', th: 1, st: 0, br: false });
+    await sleep(400);
+    const moved = await a.wait(m => m.t === 's' && m.vs?.some(v => v[0] === kid && Math.abs(v[2] - kx) + Math.abs(v[4] - kz) > 0.4), 3000);
+    check(!!moved, 'driving the keke moves it');
+
+    b.send({ t: 'exit' });
+    const ex = await b.wait(m => m.t === 'vexit', 2000);
+    check(ex.id === kid, 'Bravo exited the keke');
+    a.send({ t: 'exit' });
+    await a.wait(m => m.t === 'vexit', 2000);
+
+    // Seat limit: fill remaining mentally already tested statically; here a third enter after 2 is seat 2 if we re-enter
+    // Damage + explosion + respawn on the empty car
+    const cx = carRow[2], cz = carRow[4], cid = carRow[0];
+    const from = [cx, 0, cz + 6];
+    await stand(a, from);
+    await stand(b, [cx + 3.5, 0, cz]); // close enough for blast, not inside the car
+    const hpBefore = 100;
+    const o = [from[0], 1.6, from[2]], d = [0, (0.7 - 1.6), cz - from[2]];
+    const ln = Math.hypot(...d);
+    let boom = null;
+    for (let i = 0; i < 20; i++) {
+      pos(a, from);
+      a.send({ t: 'shoot', o, d: d.map(v => v / ln), e: [cx, 0.7, cz] });
+      await sleep(120);
+      boom = a.msgs.find(m => m.t === 'vboom' && m.id === cid);
+      if (boom) break;
+    }
+    check(!!boom, 'enough shots destroy the car and it explodes');
+    const hurt = b.msgs.find(m => m.t === 'hurt' && m.hp < hpBefore);
+    check(!!hurt, `explosion damaged a nearby player (hp=${hurt?.hp})`);
+    const back = await a.wait(m => m.t === 'vspawn' || (m.t === 's' && m.vs?.some(v => v[0] === cid && v[7] === 1 && v[6] >= 140)), 4000);
+    check(!!back, 'destroyed car respawned after its timer');
+
     a.ws.close(); b.ws.close();
   });
 } catch (e) { ok = false; log('ERROR', e.message); }

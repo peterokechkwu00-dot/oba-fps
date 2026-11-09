@@ -9,9 +9,14 @@ import {
   MAX_HP, MAX_ARMOUR, BODY_DMG, HEAD_DMG, FIRE_INTERVAL, RESPAWN_MS,
   EYE_HEIGHT, HEAD_Y, CHEST_Y, PLAYER_RADIUS, PLAYER_HEIGHT, MAG_SIZE, RESERVE_AMMO, MAX_RESERVE,
   AMMO_GIVE, MED_HEAL, ARMOUR_GIVE, ARMOUR_ABSORB, REGEN_DELAY, REGEN_RATE,
-  PICKUP_RADIUS, MED_RESPAWN, ARM_RESPAWN, AMMO_RESPAWN,
+  PICKUP_RADIUS, MED_RESPAWN, ARM_RESPAWN, AMMO_RESPAWN, rayAABB,
 } from './public/shared/map.js';
 import { getItem } from './public/shared/catalog.js';
+import {
+  vehicleSpawns, createVehicle, resetVehicle, stepVehicle, packVehicle,
+  firstFreeSeat, occupierSeat, seatWorld, exitPos, vehicleBounds, vehicleSpeed,
+  VEHICLE_TYPES, VEHICLE_RESPAWN, VEHICLE_ENTER_R,
+} from './public/shared/vehicles.js';
 import { initDb, dbReady } from './lib/db.js';
 import { mountAuth, accountFromCookie } from './lib/auth.js';
 import { mountShop, paystackWebhookHandler, paymentsEnabled } from './lib/shop.js';
@@ -30,6 +35,7 @@ const PICKUP_RESPAWN_MS = {
 };
 const REGEN_DELAY_MS = Number(process.env.REGEN_DELAY) || REGEN_DELAY;
 const REGEN_HP_S = Number(process.env.REGEN_RATE) || REGEN_RATE;
+const VEH_RESPAWN_MS = Number(process.env.VEH_RESPAWN) || VEHICLE_RESPAWN;
 
 const app = express();
 app.set('trust proxy', 1);
@@ -66,20 +72,24 @@ let votes = new Map();
 let voteOptionsArr = [];
 
 let map, AABBS, SPAWNS, ARENA_HALF, pickups;
+let vehicles = [];
 
 function applyMap(id) {
+  if (typeof ejectAll === 'function') ejectAll();
   map = getMap(id);
   AABBS = map.AABBS;
   SPAWNS = map.SPAWNS;
   ARENA_HALF = map.ARENA_HALF;
   pickups = map.PICKUPS.map((p, i) => ({ id: i, kind: p.kind, x: p.x, y: p.y || 0, z: p.z, up: true, respawnAt: 0 }));
+  vehicles = vehicleSpawns(map.id).map((sp, i) => createVehicle(i + 1, sp));
 }
 applyMap(process.env.MAP || process.env.DEFAULT_MAP || DEFAULT_MAP);
 
 const mapInfo = () => ({ id: map.id, name: map.name });
 const pickupPayload = () => pickups.map(p => ({ id: p.id, kind: p.kind, x: p.x, y: p.y, z: p.z, up: p.up }));
 const voteChoices = () => listMaps().filter(m => m.id !== map.id);
-const timers = () => ({ vote: VOTE_MS, med: PICKUP_RESPAWN_MS.med, armour: PICKUP_RESPAWN_MS.armour, ammo: PICKUP_RESPAWN_MS.ammo, regenDelay: REGEN_DELAY_MS, regenRate: REGEN_HP_S });
+const timers = () => ({ vote: VOTE_MS, med: PICKUP_RESPAWN_MS.med, armour: PICKUP_RESPAWN_MS.armour, ammo: PICKUP_RESPAWN_MS.ammo, regenDelay: REGEN_DELAY_MS, regenRate: REGEN_HP_S, veh: VEH_RESPAWN_MS });
+const vehiclePayload = () => vehicles.map(packVehicle);
 function voteCounts() {
   const counts = {};
   for (const o of voteOptionsArr) counts[o.id] = 0;
@@ -115,6 +125,7 @@ function createPlayer(name, ws, bot = false) {
     lastShot: 0, respawnAt: 0, lastHurt: 0,
     wp: null, nextShot: 0, seenAt: 0, strafe: 1,
     accountId: null, camo: null, rifle: null, tag: null,
+    vehicleId: 0, seat: -1,
   };
   players.set(id, p);
   spawn(p);
@@ -122,6 +133,7 @@ function createPlayer(name, ws, bot = false) {
 }
 
 function spawn(p) {
+  ejectPlayer(p);
   const others = [...players.values()].filter(o => o !== p && o.alive);
   const scored = SPAWNS.map(s => ({ s, d: others.length ? Math.min(...others.map(o => Math.hypot(o.p[0] - s[0], o.p[2] - s[1]))) : Math.random() * 100 }))
     .sort((a, b) => b.d - a.d);
@@ -171,6 +183,7 @@ function damage(att, tgt, dmg, head) {
   send(tgt.ws, { t: 'hurt', by: att.id, dmg: raw, hp: tgt.hp, armour: tgt.armour, from: att.p });
   if (!kill) return;
   tgt.alive = false; tgt.deaths++; tgt.respawnAt = Date.now() + RESPAWN_MS; tgt.armour = 0;
+  ejectPlayer(tgt);
   if (att !== tgt) { att.kills++; recordKill(att.accountId); }
   recordDeath(tgt.accountId);
   broadcast({ t: 'kill', killer: att.id, victim: tgt.id, head, kn: att.name, vn: tgt.name });
@@ -204,7 +217,7 @@ function finishVote() {
   votes = new Map();
   voteOptionsArr = [];
   for (const p of players.values()) { p.kills = 0; p.deaths = 0; spawn(p); }
-  broadcast({ t: 'roundStart', map: mapInfo(), pickups: pickupPayload() });
+  broadcast({ t: 'roundStart', map: mapInfo(), pickups: pickupPayload(), vehicles: vehiclePayload() });
   sendRoster();
 }
 
@@ -256,11 +269,129 @@ function usefulPickup(b) {
 
 function removePlayer(p) {
   if (!players.has(p.id)) return;
+  ejectPlayer(p);
   players.delete(p.id);
   votes.delete(p.id);
   broadcast({ t: 'leave', id: p.id });
   broadcast({ t: 'feed', msg: `${p.name} left` });
   sendRoster();
+}
+
+
+function playerVehicle(p) { return p.vehicleId ? vehicles.find(v => v.id === p.vehicleId) : null; }
+
+function ejectPlayer(p, side = 1) {
+  if (!p || !p.vehicleId) return;
+  const v = vehicles.find(veh => veh.id === p.vehicleId);
+  if (v) {
+    const i = occupierSeat(v, p.id);
+    if (i >= 0) v.seats[i] = 0;
+    if (p.alive) {
+      const ex = exitPos(v, side);
+      p.p = [ex[0], ex[1], ex[2]];
+    }
+    if (!v.seats[0]) { v.throttle = 0; v.steer = 0; v.brake = true; }
+  }
+  p.vehicleId = 0; p.seat = -1;
+}
+
+function ejectAll() {
+  for (const p of players.values()) ejectPlayer(p);
+}
+
+function tryEnter(p, id) {
+  if (!p.alive || roundOver) return { ok: false, reason: 'busy' };
+  if (p.vehicleId) return { ok: false, reason: 'already' };
+  const v = vehicles.find(veh => veh.id === id);
+  if (!v || !v.alive) return { ok: false, reason: 'gone' };
+  const d = Math.hypot(p.p[0] - v.x, p.p[2] - v.z);
+  if (d > VEHICLE_ENTER_R + 1.2) return { ok: false, reason: 'far' };
+  const seat = firstFreeSeat(v);
+  if (seat < 0) return { ok: false, reason: 'full' };
+  v.seats[seat] = p.id;
+  p.vehicleId = v.id;
+  p.seat = seat;
+  const sw = seatWorld(v, seat);
+  p.p = sw;
+  return { ok: true, seat, id: v.id };
+}
+
+function explodeVehicle(v, att) {
+  if (!v.alive) return;
+  v.alive = false;
+  v.hp = 0;
+  v.vx = 0; v.vz = 0; v.speed = 0;
+  v.wreckUntil = Date.now() + 2000;
+  v.respawnAt = Date.now() + VEH_RESPAWN_MS;
+  const occupants = v.seats.filter(Boolean).map(id => players.get(id)).filter(Boolean);
+  for (const o of occupants) ejectPlayer(o);
+  broadcast({ t: 'vboom', id: v.id, x: v.x, y: v.y, z: v.z });
+  const range = 6;
+  for (const q of players.values()) {
+    if (!q.alive) continue;
+    const d = Math.hypot(q.p[0] - v.x, q.p[1] - v.y, q.p[2] - v.z);
+    if (d >= range) continue;
+    const dmg = Math.round(60 * (1 - d / range));
+    if (dmg > 0) damage(att && att.alive ? att : q, q, dmg, false);
+  }
+}
+
+function damageVehicle(v, amount, att) {
+  if (!v.alive) return;
+  v.hp = Math.max(0, v.hp - amount);
+  broadcast({ t: 'vhit', id: v.id, hp: v.hp });
+  if (v.hp <= 0) explodeVehicle(v, att);
+}
+
+function rayVehicles(o, d) {
+  let best = Infinity, hit = null;
+  for (const v of vehicles) {
+    if (!v.alive) continue;
+    const t = rayAABB(o, d, vehicleBounds(v));
+    if (t < best) { best = t; hit = v; }
+  }
+  return { t: best, v: hit };
+}
+
+function seatOccupants() {
+  for (const v of vehicles) {
+    if (!v.alive) continue;
+    for (let i = 0; i < v.seats.length; i++) {
+      const p = players.get(v.seats[i]);
+      if (!p) { v.seats[i] = 0; continue; }
+      const sw = seatWorld(v, i);
+      p.p = sw;
+      if (i === 0) p.yaw = v.yaw;
+    }
+  }
+}
+
+function tickVehicles(dt, now) {
+  for (const v of vehicles) {
+    if (!v.alive) {
+      if (v.respawnAt && now >= v.respawnAt) {
+        resetVehicle(v);
+        broadcast({ t: 'vspawn', v: packVehicle(v) });
+      }
+      continue;
+    }
+    stepVehicle(v, dt, AABBS, vehicles);
+    const typ = VEHICLE_TYPES[v.type];
+    const spd = vehicleSpeed(v);
+    if (spd > 6.5 && v.seats[0] && now - (v.lastRun || 0) > 700) {
+      const driver = players.get(v.seats[0]);
+      for (const q of players.values()) {
+        if (!q.alive || q.vehicleId === v.id || q === driver) continue;
+        const d = Math.hypot(q.p[0] - v.x, q.p[2] - v.z);
+        if (d < typ.halfW + 0.7 && Math.abs((q.p[1] || 0) - v.y) < typ.h) {
+          const dmg = Math.min(40, Math.round(10 + spd * 1.4));
+          v.lastRun = now;
+          if (driver) damage(driver, q, dmg, false);
+        }
+      }
+    }
+  }
+  seatOccupants();
 }
 
 const num = v => typeof v === 'number' && Number.isFinite(v);
@@ -287,7 +418,7 @@ wss.on('connection', (ws, req) => {
       }
       send(ws, {
         t: 'welcome', id: me.id, seq: me.seq, p: me.p, yaw: me.yaw, win: WIN_KILLS, list: roster(),
-        roundOver, map: mapInfo(), pickups: pickupPayload(), maps: listMaps(),
+        roundOver, map: mapInfo(), pickups: pickupPayload(), vehicles: vehiclePayload(), maps: listMaps(),
         armour: me.armour, ammo: me.ammo, reserve: me.reserve, timers: timers(),
         vote: roundOver ? { maps: voteOptionsArr, ms: Math.max(0, roundEndsAt - Date.now()), counts: voteCounts() } : null,
         cosmetics: { camo: me.camo, rifle: me.rifle, tag: me.tag },
@@ -300,26 +431,66 @@ wss.on('connection', (ws, req) => {
     if (!me) return;
     if (m.t === 'st') {
       if (!me.alive || m.seq !== me.seq || !vec3(m.p) || !num(m.yaw) || !num(m.pitch)) return;
-      const L = ARENA_HALF - PLAYER_RADIUS;
-      me.p = [Math.max(-L, Math.min(L, m.p[0])), Math.max(0, Math.min(20, m.p[1])), Math.max(-L, Math.min(L, m.p[2]))];
       me.yaw = m.yaw; me.pitch = Math.max(-1.6, Math.min(1.6, m.pitch));
+      if (!me.vehicleId) {
+        const L = ARENA_HALF - PLAYER_RADIUS;
+        me.p = [Math.max(-L, Math.min(L, m.p[0])), Math.max(0, Math.min(20, m.p[1])), Math.max(-L, Math.min(L, m.p[2]))];
+      }
       if (num(m.reserve)) me.reserve = Math.max(0, Math.min(MAX_RESERVE, Math.round(m.reserve)));
       if (num(m.ammo)) me.ammo = Math.max(0, Math.min(MAG_SIZE, Math.round(m.ammo)));
     } else if (m.t === 'shoot') {
       const now = Date.now();
       if (!me.alive || roundOver || now - me.lastShot < FIRE_INTERVAL * 0.8) return;
+      if (me.vehicleId) {
+        const veh = vehicles.find(v => v.id === me.vehicleId);
+        if (veh && occupierSeat(veh, me.id) === 0) return; // driver can't shoot
+      }
       if (!vec3(m.o) || !vec3(m.d) || !vec3(m.e)) return;
       me.lastShot = now;
       const len = Math.hypot(...m.d) || 1;
       const d = m.d.map(v => v / len);
-      broadcast({ t: 'shot', id: me.id, o: m.o.map(round2), e: m.e.map(round2) }, me);
+      let end = m.e;
+      let hitPlayer = false;
       if (m.hit) {
         const tgt = players.get(m.hit);
         if (tgt && tgt !== me && tgt.alive) {
           const v = validateHit(me, tgt, m.o, d, m.head);
-          if (v) damage(me, tgt, v.head ? HEAD_DMG : BODY_DMG, v.head);
+          if (v) { damage(me, tgt, v.head ? HEAD_DMG : BODY_DMG, v.head); hitPlayer = true; }
         }
       }
+      if (!hitPlayer) {
+        const hit = rayVehicles(m.o, d);
+        const wall = rayMap(m.o, d, AABBS);
+        if (hit.v && hit.t < wall - 0.05 && hit.t < 120) {
+          damageVehicle(hit.v, BODY_DMG, me);
+          end = [m.o[0] + d[0] * hit.t, m.o[1] + d[1] * hit.t, m.o[2] + d[2] * hit.t];
+        }
+      }
+      broadcast({ t: 'shot', id: me.id, o: m.o.map(round2), e: (Array.isArray(end) ? end : m.e).map(round2) }, me);
+    } else if (m.t === 'enter' && num(m.id)) {
+      const r = tryEnter(me, m.id);
+      send(me.ws, { t: 'venter', ...r });
+    } else if (m.t === 'exit') {
+      if (me.vehicleId) {
+        const vid = me.vehicleId;
+        ejectPlayer(me, m.side === -1 ? -1 : 1);
+        send(me.ws, { t: 'vexit', id: vid });
+      }
+    } else if (m.t === 'drive') {
+      if (!me.alive || !me.vehicleId) return;
+      const v = vehicles.find(veh => veh.id === me.vehicleId);
+      if (!v || !v.alive || v.seats[0] !== me.id) return;
+      if (num(m.th)) v.throttle = Math.max(-1, Math.min(1, m.th));
+      if (num(m.st)) v.steer = Math.max(-1, Math.min(1, m.st));
+      v.brake = !!m.br;
+    } else if (m.t === 'horn') {
+      if (!me.vehicleId) return;
+      const v = vehicles.find(veh => veh.id === me.vehicleId);
+      if (!v || !v.alive) return;
+      const now = Date.now();
+      if (now - (v.lastHorn || 0) < 600) return;
+      v.lastHorn = now;
+      broadcast({ t: 'horn', id: v.id });
     } else if (m.t === 'vote' && typeof m.map === 'string') {
       if (!roundOver) return;
       if (!voteOptionsArr.some(o => o.id === m.map)) return;
@@ -424,10 +595,12 @@ setInterval(() => {
     if (p.bot) updateBot(p, dt, now);
   }
   tickPickups(now);
+  tickVehicles(dt, now);
   if (humans() === 0) return;
   broadcast({
     t: 's', ts: now,
     ps: [...players.values()].map(p => [p.id, round2(p.p[0]), round2(p.p[1]), round2(p.p[2]), round2(p.yaw), round2(p.pitch), Math.round(p.hp), Math.round(p.armour), p.alive ? 1 : 0]),
+    vs: vehicles.map(packVehicle),
   });
 }, 1000 / TICK_HZ);
 

@@ -224,7 +224,33 @@ function flushQueued(root, store, colliders) {
   store.clear();
 }
 
-function buildKeke(rot) {
+
+export function buildCar(rot, color = '#c62828') {
+  const g = new THREE.Group();
+  const bodyC = mat(null, { color });
+  const dark = mat(null, { color: shade(color, 0.7) });
+  const black = mat(null, { color: '#1a1a1a' });
+  const glass = new THREE.MeshLambertMaterial({ color: '#8fb8cc', transparent: true, opacity: 0.45 });
+  const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.7, 1.5), bodyC); cabin.position.set(0, 1.25, -0.15); cabin.castShadow = true; g.add(cabin);
+  const hull = new THREE.Mesh(new THREE.BoxGeometry(1.8, 0.55, 4.2), dark); hull.position.set(0, 0.62, 0); hull.castShadow = true; g.add(hull);
+  const hood = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.2, 1.1), bodyC); hood.position.set(0, 0.95, -1.4); g.add(hood);
+  const boot = new THREE.Mesh(new THREE.BoxGeometry(1.7, 0.2, 0.9), bodyC); boot.position.set(0, 0.95, 1.4); g.add(boot);
+  const wind = new THREE.Mesh(new THREE.BoxGeometry(1.55, 0.5, 0.05), glass); wind.position.set(0, 1.35, -0.92); g.add(wind);
+  const rear = new THREE.Mesh(new THREE.BoxGeometry(1.55, 0.4, 0.05), glass); rear.position.set(0, 1.3, 0.62); g.add(rear);
+  const lightGeo = new THREE.BoxGeometry(0.28, 0.14, 0.08);
+  for (const x of [-0.55, 0.55]) {
+    const f = new THREE.Mesh(lightGeo, mat(null, { color: '#fff8dc' })); f.position.set(x, 0.62, -2.12); g.add(f);
+    const r = new THREE.Mesh(lightGeo, mat(null, { color: '#c62828' })); r.position.set(x, 0.62, 2.12); g.add(r);
+  }
+  const wheelGeo = new THREE.CylinderGeometry(0.32, 0.32, 0.22, 14);
+  for (const [x, z] of [[-0.85, -1.25], [0.85, -1.25], [-0.85, 1.25], [0.85, 1.25]]) {
+    const w = new THREE.Mesh(wheelGeo, black); w.rotation.z = Math.PI / 2; w.position.set(x, 0.32, z); w.castShadow = true; g.add(w);
+  }
+  g.rotation.y = rot ? Math.PI / 2 : 0;
+  return g;
+}
+
+export function buildKeke(rot) {
   const g = new THREE.Group();
   const yellow = mat(null, { color: '#f7c600' }), green = mat(null, { color: '#1b7a3a' }), black = mat(null, { color: '#1a1a1a' });
   const glass = new THREE.MeshLambertMaterial({ color: '#8fb8cc', transparent: true, opacity: 0.45 });
@@ -244,7 +270,7 @@ function buildKeke(rot) {
   g.rotation.y = rot ? Math.PI / 2 : 0;
   return g;
 }
-function buildDanfo(rot) {
+export function buildDanfo(rot) {
   const g = new THREE.Group();
   const body = new THREE.Mesh(boxGeo(2.2, 2.0, 5.5, 1, 1), [
     mat(T.danfo()), mat(T.danfo()), mat(null, { color: '#f5b800' }), mat(null, { color: '#222' }), mat(T.danfo()), mat(T.danfo()),
@@ -261,7 +287,7 @@ function buildDanfo(rot) {
   g.rotation.y = rot ? Math.PI / 2 : 0;
   return g;
 }
-function buildTruck(rot, color = '#3e4a2c') {
+export function buildTruck(rot, color = '#3e4a2c') {
   const g = new THREE.Group();
   const bodyC = mat(null, { color });
   const dark = mat(null, { color: shade(color, 0.65) });

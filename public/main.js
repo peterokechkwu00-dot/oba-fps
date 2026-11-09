@@ -12,7 +12,9 @@ import { getItem } from './shared/catalog.js';
 import * as sfx from './audio.js';
 import { buildRifle, flashTexture, applyRifleSkin } from './weapon.js';
 import * as comms from './comms.js';
-import { isTouch, state as touch, LOOK_SENS, initTouch, requestImmersive, setTouchVisible, setAiming, refreshMic } from './touch.js';
+import { isTouch, state as touch, LOOK_SENS, initTouch, requestImmersive, setTouchVisible, setAiming, refreshMic, setEnterVisible } from './touch.js';
+import { createVehicleField, updateExplosions } from './drive.js';
+import { VEHICLE_ENTER_R, VEHICLE_TYPES, vehicleSpawns, packVehicle, createVehicle, seatWorld } from './shared/vehicles.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 const $ = id => document.getElementById(id);
@@ -38,10 +40,11 @@ let AABBS = currentMap.AABBS;
 let ARENA_HALF = currentMap.ARENA_HALF;
 let colliders = [];
 let pickupField = null;
+let vehicleField = null;
 function setMapName(name) {
   for (const id of ['mapname', 'menumap', 'sbmap']) { const el = $(id); if (el) el.textContent = name; }
 }
-function loadClientMap(id, pickupList) {
+function loadClientMap(id, pickupList, vehicleList) {
   currentMap = getMap(id);
   AABBS = currentMap.AABBS;
   ARENA_HALF = currentMap.ARENA_HALF;
@@ -50,6 +53,10 @@ function loadClientMap(id, pickupList) {
   colliders = built.colliders;
   pickupField?.dispose();
   pickupField = createPickupField(scene, pickupList || currentMap.PICKUPS.map((p, i) => ({ ...p, id: i, up: true })));
+  vehicleField?.dispose();
+  vehicleField = createVehicleField(scene);
+  const rows = vehicleList || vehicleSpawns(currentMap.id).map((sp, i) => packVehicle(createVehicle(i + 1, sp)));
+  vehicleField.sync(rows);
 }
 loadClientMap(DEFAULT_MAP);
 addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); weaponCamera.aspect = camera.aspect; weaponCamera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
@@ -84,6 +91,7 @@ rig.position.copy(HIP);
 const me = {
   id: null, pos: new THREE.Vector3(), vel: new THREE.Vector3(), yaw: 0, pitch: 0, onGround: true, hp: MAX_HP, alive: false, seq: 0,
   ammo: MAG_SIZE, reserve: RESERVE_AMMO, armour: 0, reloading: false, reloadEnd: 0, lastShot: 0, recoil: 0, stepT: 0,
+  vehicleId: 0, seat: -1,
 };
 const keys = {}; let mouseDown = false, aiming = false, locked = false, joined = false, ws = null;
 let roster = [], winKills = 20, roundOver = false, deathTimer = 0, roundTimerEnd = 0;
@@ -112,7 +120,7 @@ const handlers = {
     me.id = m.id; me.seq = m.seq; winKills = m.win; roster = m.list; roundOver = m.roundOver;
     me.pos.set(...m.p); me.yaw = m.yaw; me.alive = true; me.hp = MAX_HP;
     me.armour = m.armour || 0; if (m.reserve != null) me.reserve = m.reserve; if (m.ammo != null) me.ammo = m.ammo;
-    if (m.map) loadClientMap(m.map.id, m.pickups);
+    if (m.map) loadClientMap(m.map.id, m.pickups, m.vehicles);
     joined = true; $('menu').classList.add('hidden'); $('hud').classList.remove('hidden'); $('sbwin').textContent = winKills;
     updateScore(); comms.chatLine('', `Welcome to ${currentMap.name}, ${nameOf(me.id)}! ` + (isTouch ? 'Voice is open-mic — tap 🎤 to mute, CHAT to type.' : 'Voice chat is open-mic — press V to mute/unmute, T to type.'), 'sys');
     for (const r of roster) if (r.talk) comms.talking.add(r.id);
@@ -142,6 +150,7 @@ const handlers = {
       if (!!alive !== r.s.alive) r.s.setAlive(!!alive);
     }
     for (const [id, r] of remotes) if (!seen.has(id)) { scene.remove(r.s.root); remotes.delete(id); }
+    if (m.vs) vehicleField?.sync(m.vs);
   },
   spawn(m) {
     if (m.id === me.id) {
@@ -191,7 +200,7 @@ const handlers = {
   roundStart(m) {
     roundOver = false; hideVote();
     $('roundend').classList.add('hidden'); $('scoreboard').classList.add('hidden');
-    if (m && m.map) loadClientMap(m.map.id, m.pickups);
+    if (m && m.map) loadClientMap(m.map.id, m.pickups, m.vehicles);
     center(`NEW ROUND — ${currentMap.name}`);
   },
   got(m) {
@@ -204,6 +213,11 @@ const handlers = {
     sfx.pickup(m.kind);
   },
   pickup(m) { pickupField?.setUp(m.id, m.up); },
+  venter(m) { if (m.ok) { me.vehicleId = m.id; me.seat = m.seat; if (m.seat === 0) aiming = false; } },
+  vexit(m) { me.vehicleId = 0; me.seat = -1; },
+  vboom(m) { vehicleField?.explode(m.id, scene); sfx.explode?.(); me.vehicleId = me.vehicleId === m.id ? 0 : me.vehicleId; if (me.vehicleId === 0) me.seat = -1; },
+  vspawn(m) { /* next snapshot carries the respawned vehicle */ },
+  horn(m) { sfx.horn(); },
   votes(m) { updateVoteCounts(m.counts); },
   feed(m) { comms.chatLine('', m.msg, 'sys'); },
   leave(m) { const r = remotes.get(m.id); if (r) { scene.remove(r.s.root); remotes.delete(m.id); } },
@@ -282,6 +296,7 @@ initTouch({
   onChat() { if (comms.isChatting()) comms.closeChat(); else comms.openChat(); },
   onScore() { toggleScoreboard(); },
   onScoreClose() { if (!roundOver) { $('scoreboard').classList.add('hidden'); $('scoreboard').classList.remove('interactive'); } },
+  onEnter() { tryEnterExit(); },
 });
 
 // ---------- Input ----------
@@ -324,9 +339,61 @@ addEventListener('keydown', e => {
   if (e.code === 'Tab') { e.preventDefault(); if (joined) { renderScoreboard(); $('scoreboard').classList.remove('hidden'); } return; }
   keys[e.code] = true;
   if (e.code === 'KeyR') startReload();
+  if (joined && e.code === 'KeyE' && !e.repeat) tryEnterExit();
+  if (joined && e.code === 'KeyH' && !e.repeat) net({ t: 'horn' });
 });
 addEventListener('keyup', e => { keys[e.code] = false; if (e.code === 'Tab' && !roundOver && locked) $('scoreboard').classList.add('hidden'); });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; mouseDown = false; });
+
+function nearestVehicle() {
+  if (!vehicleField) return null;
+  let best = null, bestD = VEHICLE_ENTER_R;
+  for (const rec of vehicleField.all()) {
+    const st = rec.render || rec.last;
+    if (!st || !st.alive) continue;
+    const d = Math.hypot(st.x - me.pos.x, st.z - me.pos.z);
+    if (d < bestD) { bestD = d; best = { ...st, id: rec.id }; }
+  }
+  return best;
+}
+function tryEnterExit() {
+  if (!me.alive || roundOver) return;
+  if (me.vehicleId) { net({ t: 'exit' }); return; }
+  const near = nearestVehicle();
+  if (near) net({ t: 'enter', id: near.id });
+}
+function updateVehHint() {
+  const el = $('vehhint');
+  if (!el) return;
+  if (!joined || !me.alive) { el.classList.add('hidden'); setEnterVisible(false, false); return; }
+  if (me.vehicleId) {
+    el.textContent = isTouch ? 'EXIT  ·  joystick to drive  ·  passengers can shoot' : 'E exit   ·   WASD drive   ·   H horn   ·   passengers can look and shoot';
+    el.classList.remove('hidden');
+    setEnterVisible(true, true);
+    return;
+  }
+  const near = nearestVehicle();
+  if (near) {
+    const typ = near.type || 'vehicle';
+    el.textContent = isTouch ? `ENTER ${typ}` : `Press E to enter ${typ}`;
+    el.classList.remove('hidden');
+    setEnterVisible(true, false);
+  } else {
+    el.classList.add('hidden');
+    setEnterVisible(false, false);
+  }
+}
+let driveSend = 0;
+function sendDrive(dt) {
+  if (!me.vehicleId || me.seat !== 0) return;
+  driveSend += dt;
+  if (driveSend < 1 / 20) return;
+  driveSend = 0;
+  const fwd = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0) + (touch.fwd || 0);
+  const steer = (keys.KeyA ? 1 : 0) - (keys.KeyD ? 1 : 0) - (touch.str || 0);
+  const br = !!(keys.Space || (keys.KeyS && fwd <= 0 && !touch.fwd));
+  net({ t: 'drive', th: Math.max(-1, Math.min(1, fwd)), st: Math.max(-1, Math.min(1, steer)), br });
+}
 
 // ---------- Physics & collision ----------
 function overlapsAt(x, y, z, a) {
@@ -345,6 +412,24 @@ function moveAxis(i, amt) {
   const L = ARENA_HALF - R; p[key] = Math.max(-L, Math.min(L, p[key]));
 }
 function physics(dt) {
+  if (me.vehicleId) {
+    const rec = vehicleField?.get(me.vehicleId);
+    const st = rec?.render || rec?.last;
+    if (st) {
+      const seat = me.seat >= 0 ? me.seat : 0;
+      const sw = seatWorld({ x: st.x, y: st.y, z: st.z, yaw: st.yaw, type: st.type }, seat);
+      me.pos.set(sw[0], sw[1], sw[2]);
+      if (seat === 0) me.yaw = st.yaw;
+      const spd = Math.hypot((st.x - (rec._lx ?? st.x)) / Math.max(dt, 1e-3), (st.z - (rec._lz ?? st.z)) / Math.max(dt, 1e-3));
+      rec._lx = st.x; rec._lz = st.z;
+      me.vel.set(0, 0, 0); me.onGround = true;
+      sendDrive(dt);
+      sfx.engine(Math.min(1, spd / 16));
+      return spd;
+    }
+  } else {
+    sfx.engine(0);
+  }
   const fwd = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0) + (touch.fwd || 0);
   const str = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0) + (touch.str || 0);
   const sprint = keys.ShiftLeft || keys.ShiftRight || touch.sprint;
@@ -403,6 +488,7 @@ function muzzleWorld() {
   return camera.position.clone().addScaledVector(v, 0.8);
 }
 function shoot(now, moving) {
+  if (me.vehicleId && me.seat === 0) return;
   if (!me.alive || roundOver || me.reloading || now - me.lastShot < FIRE_INTERVAL) return;
   if (me.ammo <= 0) { startReload(); return; }
   me.lastShot = now; me.ammo--;
@@ -475,11 +561,23 @@ function frame(now) {
     if ((mouseDown && locked) || (isTouch && touch.fire)) shoot(now, hs > 1.5);
     me.recoil = Math.max(0, me.recoil - dt * 0.35);
     // camera
-    if (me.alive) {
+    if (me.alive && me.vehicleId && me.seat === 0 && !(window.__game?.forceView)) {
+      const rec = vehicleField?.get(me.vehicleId);
+      const st = rec?.render || rec?.last;
+      if (st) {
+        const typ = VEHICLE_TYPES[st.type] || VEHICLE_TYPES.car;
+        const back = typ.halfL + 4.0, height = typ.h + 1.15;
+        const fx = -Math.sin(st.yaw), fz = -Math.cos(st.yaw);
+        camera.position.set(st.x - fx * back, st.y + height, st.z - fz * back);
+        camera.lookAt(st.x + fx * 3.2, st.y + 1.05, st.z + fz * 3.2);
+        camera.rotation.z = 0;
+        rig.visible = false;
+      }
+    } else if (me.alive) {
       const bob = me.onGround ? Math.sin(now / 1000 * hs * 1.7) * Math.min(1, hs / 8) * 0.04 : 0;
       camera.position.set(me.pos.x, me.pos.y + EYE_HEIGHT + bob, me.pos.z);
       camera.rotation.set(me.pitch + me.recoil, me.yaw, 0);
-      rig.visible = true;
+      rig.visible = !(me.vehicleId && me.seat === 0);
     } else {
       camera.position.y += (me.pos.y + 0.4 - camera.position.y) * Math.min(1, dt * 4);
       camera.rotation.z += (0.5 - camera.rotation.z) * Math.min(1, dt * 3);
@@ -536,6 +634,9 @@ function frame(now) {
     camera.position.set(Math.cos(t) * 30, 14, Math.sin(t) * 30); camera.lookAt(0, 2, 0);
   }
   pickupField?.update(now);
+  vehicleField?.update(dt, now);
+  updateExplosions(dt, scene);
+  if (joined) updateVehHint();
   for (let i = tracers.length - 1; i >= 0; i--) { const tr = tracers[i]; tr.life -= dt; tr.m.material.opacity = Math.max(0, tr.life / 0.08) * 0.85; if (tr.life <= 0) { scene.remove(tr.m); tr.m.material.dispose(); tracers.splice(i, 1); } }
   for (let i = sparks.length - 1; i >= 0; i--) { const s = sparks[i]; s.life -= dt; s.m.material.opacity = s.life / 0.25; s.m.scale.setScalar(1 + (0.25 - s.life) * 4); if (s.life <= 0) { scene.remove(s.m); s.m.material.dispose(); sparks.splice(i, 1); } }
   renderer.clear();
@@ -550,4 +651,4 @@ initAccount({
 
 // Test hook: ?autojoin=Name joins immediately (used for headless screenshots)
 if (params.has('autojoin')) { $('name').value = params.get('autojoin') || 'Tester'; join(); }
-window.__game = { me, remotes, comms, anim, rifle, touch, isTouch, camera, scene, setAim: v => { aiming = v; setAiming(v); }, reload: () => startReload(), fire: () => { me.lastShot = 0; shoot(performance.now(), false); }, get joined() { return joined; }, get map() { return currentMap; }, forceView: null };
+window.__game = { me, remotes, comms, anim, rifle, touch, isTouch, camera, scene, setAim: v => { aiming = v; setAiming(v); }, reload: () => startReload(), fire: () => { me.lastShot = 0; shoot(performance.now(), false); }, get joined() { return joined; }, get map() { return currentMap; }, forceView: null, get vehicles() { return vehicleField; }, tryEnterExit, keys, net };

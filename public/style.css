@@ -233,3 +233,12 @@ table.board tr.me td { color: #c9e265; font-weight: bold; }
   .item-card { grid-template-columns: 28px 1fr; }
   .item-card button { grid-column: 1 / -1; }
 }
+
+#vehhint {
+  position: absolute; left: 50%; bottom: 18%; transform: translateX(-50%);
+  padding: 8px 16px; background: rgba(0,0,0,0.62); color: #ffe082; font: 700 15px/1.3 system-ui, sans-serif;
+  letter-spacing: 0.04em; border-radius: 6px; pointer-events: none; z-index: 16;
+  text-shadow: 0 1px 2px #000; white-space: nowrap;
+}
+#btnEnter { left: max(16px, env(safe-area-inset-left)); bottom: calc(max(20px, env(safe-area-inset-bottom)) + 108px); right: auto; }
+body.touch.portrait #btnEnter { bottom: calc(max(16px, env(safe-area-inset-bottom)) + 100px); }
