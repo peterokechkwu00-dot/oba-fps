@@ -1,6 +1,6 @@
-// Builds the "Oba, Anambra" arena: canvas-generated textures, buildings, shops, signs, keke, danfo, palms.
+// Builds a map arena: canvas-generated textures, buildings, shops, signs, vehicles, palms.
 import * as THREE from 'three';
-import { BOXES, ROADS, DIRT, PALMS, UMBRELLAS, BILLBOARDS, CANOPIES, ARENA_HALF } from './shared/map.js';
+import { getMap, DEFAULT_MAP } from './shared/map.js';
 
 let maxAniso = 4;
 const texCache = new Map();
@@ -129,6 +129,31 @@ const T = {
     for (let y = 8; y < h; y += 7) { const half = (w / 2 - 2) * Math.sin(Math.PI * y / h); g.save(); g.translate(w / 2, y); g.rotate(-0.4); g.fillRect(-half, 0, half, 3); g.restore(); g.save(); g.translate(w / 2, y); g.rotate(0.4); g.fillRect(0, 0, half, 3); g.restore(); }
     g.fillStyle = '#5a4a20'; g.fillRect(w / 2 - 2, 0, 4, h);
   }, 'frond'),
+  yard: () => canvasTex(256, 256, (g, w, h) => {
+    g.fillStyle = '#7a7d80'; g.fillRect(0, 0, w, h);
+    speckle(g, w, h, 3500, ['#5c5f62', '#9aa0a4', '#6a6d70', '#8a7a60'], 3);
+    g.strokeStyle = 'rgba(40,40,40,0.35)'; g.lineWidth = 2;
+    for (let i = 0; i < 6; i++) { g.beginPath(); g.moveTo(0, i * 42 + 8); g.lineTo(w, i * 42 + 16); g.stroke(); }
+    for (let i = 0; i < 8; i++) { g.fillStyle = 'rgba(30,30,30,0.2)'; g.fillRect(rnd(0, w), rnd(0, h), rnd(20, 60), rnd(4, 10)); }
+  }, 'yard'),
+  sandbag: () => canvasTex(128, 64, (g, w, h) => {
+    g.fillStyle = '#c2a36b'; g.fillRect(0, 0, w, h);
+    for (let y = 0; y < h; y += 16) { g.fillStyle = y % 32 ? '#b39158' : '#d4b57a'; g.fillRect(0, y, w, 15); }
+    speckle(g, w, h, 600, ['#8a6a38', '#e0c890', '#6e5428'], 3);
+    g.strokeStyle = 'rgba(70,50,20,0.45)'; g.lineWidth = 3; g.strokeRect(2, 2, w - 4, h - 4);
+  }, 'sandbag'),
+  container: (color) => canvasTex(256, 128, (g, w, h) => {
+    g.fillStyle = color; g.fillRect(0, 0, w, h);
+    for (let x = 0; x < w; x += 10) { g.fillStyle = 'rgba(0,0,0,0.18)'; g.fillRect(x, 0, 3, h); g.fillStyle = 'rgba(255,255,255,0.12)'; g.fillRect(x + 3, 0, 2, h); }
+    g.fillStyle = shade(color, 0.7); g.fillRect(0, 0, w, 8); g.fillRect(0, h - 8, w, 8);
+    g.fillStyle = '#222'; g.fillRect(w * 0.72, h * 0.28, w * 0.2, h * 0.44);
+    g.strokeStyle = 'rgba(0,0,0,0.4)'; g.lineWidth = 4; g.strokeRect(0, 0, w, h);
+  }, 'ctr' + color),
+  water: () => canvasTex(256, 256, (g, w, h) => {
+    g.fillStyle = '#1a5f7a'; g.fillRect(0, 0, w, h);
+    for (let i = 0; i < 18; i++) { g.strokeStyle = `rgba(180,220,230,${rnd(0.08, 0.22)})`; g.lineWidth = rnd(2, 5); g.beginPath(); g.moveTo(0, rnd(0, h)); g.bezierCurveTo(rnd(0, w), rnd(0, h), rnd(0, w), rnd(0, h), w, rnd(0, h)); g.stroke(); }
+    speckle(g, w, h, 800, ['#0e3a4a', '#4a8aa0', '#2a7088'], 3);
+  }, 'water'),
 };
 
 export function signTexture(text, sub, bg, fg, aspect) {
@@ -207,6 +232,23 @@ function buildDanfo(rot) {
   g.rotation.y = rot ? Math.PI / 2 : 0;
   return g;
 }
+function buildTruck(rot, color = '#3e4a2c') {
+  const g = new THREE.Group();
+  const bodyC = mat(null, { color });
+  const dark = mat(null, { color: shade(color, 0.65) });
+  const black = mat(null, { color: '#1a1a1a' });
+  const glass = new THREE.MeshLambertMaterial({ color: '#8fb8cc', transparent: true, opacity: 0.45 });
+  const cab = new THREE.Mesh(new THREE.BoxGeometry(2.2, 2.0, 2.2), bodyC); cab.position.set(0, 1.5, -2.0); cab.castShadow = true; g.add(cab);
+  const bed = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.2, 4.0), dark); bed.position.set(0, 1.1, 1.2); bed.castShadow = true; g.add(bed);
+  const rail = new THREE.Mesh(new THREE.BoxGeometry(2.25, 0.12, 4.0), black); rail.position.set(0, 1.75, 1.2); g.add(rail);
+  const wind = new THREE.Mesh(new THREE.BoxGeometry(2.0, 0.7, 0.05), glass); wind.position.set(0, 1.85, -3.1); g.add(wind);
+  const wheelGeo = new THREE.CylinderGeometry(0.42, 0.42, 0.28, 16);
+  for (const [x, z] of [[-1.05, -2.0], [1.05, -2.0], [-1.05, 0.4], [1.05, 0.4], [-1.05, 2.4], [1.05, 2.4]]) {
+    const w = new THREE.Mesh(wheelGeo, black); w.rotation.z = Math.PI / 2; w.position.set(x, 0.42, z); w.castShadow = true; g.add(w);
+  }
+  g.rotation.y = rot ? Math.PI / 2 : 0;
+  return g;
+}
 function buildPalm(h) {
   const g = new THREE.Group();
   const trunkMat = mat(T.palmTrunk());
@@ -232,100 +274,120 @@ function buildPalm(h) {
   return g;
 }
 
-export function buildWorld(scene, renderer, opts = {}) {
-  const low = !!opts.low;
-  maxAniso = renderer.capabilities.getMaxAnisotropy();
-  const colliders = []; // meshes used for bullet raycasts (match the server's collision boxes)
+export function clearWorld(scene) {
+  const old = scene.getObjectByName('__world');
+  if (!old) return;
+  scene.remove(old);
+  old.traverse(o => { if (o.geometry) o.geometry.dispose(); });
+}
 
-  // Sky + light: hot hazy afternoon
-  scene.background = new THREE.Color('#9ccbe8');
-  scene.fog = new THREE.Fog('#cfe2ea', 45, 150);
-  scene.add(new THREE.HemisphereLight('#cfe8ff', '#a0643a', 1.1));
+export function buildWorld(scene, renderer, opts = {}) {
+  const map = opts.map || getMap(DEFAULT_MAP);
+  const low = !!opts.low;
+  const { BOXES, ROADS, DIRT, PALMS, UMBRELLAS, BILLBOARDS, CANOPIES, RIVERS, ARENA_HALF, theme } = map;
+  maxAniso = renderer.capabilities.getMaxAnisotropy();
+  clearWorld(scene);
+  const root = new THREE.Group(); root.name = '__world'; scene.add(root);
+  const colliders = [];
+
+  const sky = (theme && theme.sky) || '#9ccbe8';
+  const fog = (theme && theme.fog) || '#cfe2ea';
+  scene.background = new THREE.Color(sky);
+  scene.fog = new THREE.Fog(fog, 45, 150);
+  root.add(new THREE.HemisphereLight('#cfe8ff', '#a0643a', 1.1));
   const sun = new THREE.DirectionalLight('#fff0d0', 2.4);
   sun.position.set(30, 55, 20); sun.castShadow = true;
   sun.shadow.mapSize.set(low ? 1024 : 2048, low ? 1024 : 2048);
   Object.assign(sun.shadow.camera, { left: -50, right: 50, top: 50, bottom: -50, near: 1, far: 140 });
   sun.shadow.bias = -0.0008; sun.shadow.normalBias = 0.03;
-  scene.add(sun); scene.add(sun.target);
+  root.add(sun); root.add(sun.target);
 
-  // Ground
-  const gt = T.ground(); 
+  const gt = (theme && theme.ground === 'concrete') ? T.yard() : T.ground();
   const groundGeo = new THREE.PlaneGeometry(ARENA_HALF * 2 + 4, ARENA_HALF * 2 + 4);
   groundGeo.attributes.uv.array.forEach((v, i, a) => { a[i] = v * 21; });
-  const ground = new THREE.Mesh(groundGeo, mat(gt)); ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; scene.add(ground);
+  const ground = new THREE.Mesh(groundGeo, mat(gt)); ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true; root.add(ground);
   colliders.push(ground);
 
-  // Red-earth patches
+  for (const r of (RIVERS || [])) {
+    const tex = T.water().clone(); tex.needsUpdate = true; tex.repeat.set(r.w / 12, r.d / 12);
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(r.w, r.d), new THREE.MeshLambertMaterial({ map: tex, color: '#4aa0b8' }));
+    m.rotation.x = -Math.PI / 2; m.position.set(r.x, -0.15, r.z); root.add(m);
+  }
   for (const p of DIRT) {
     const m = new THREE.Mesh(new THREE.PlaneGeometry(p.w, p.d), new THREE.MeshLambertMaterial({ map: T.dirt(!!p.light), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -1 }));
-    m.rotation.x = -Math.PI / 2; m.position.set(p.x, 0.01, p.z); m.receiveShadow = true; scene.add(m);
+    m.rotation.x = -Math.PI / 2; m.position.set(p.x, 0.01, p.z); m.receiveShadow = true; root.add(m);
   }
-  // Roads
   for (const r of ROADS) {
     const alongZ = r.d > r.w; const len = alongZ ? r.d : r.w, wid = alongZ ? r.w : r.d;
     const tex = T.asphalt().clone(); tex.needsUpdate = true; tex.repeat.set(len / 12, 1);
     const m = new THREE.Mesh(new THREE.PlaneGeometry(len, wid), new THREE.MeshLambertMaterial({ map: tex, polygonOffset: true, polygonOffsetFactor: -2 }));
     m.rotation.x = -Math.PI / 2; if (alongZ) m.rotation.z = Math.PI / 2;
-    m.position.set(r.x, 0.02, r.z); m.receiveShadow = true; scene.add(m);
-    // raised kerbs
+    m.position.set(r.x, 0.02, r.z); m.receiveShadow = true; root.add(m);
     const kerbMat = mat(T.stripes('#e0e0e0', '#222', 8, true));
-    for (const s of [-1, 1]) {
+    for (const side of [-1, 1]) {
       const kg = boxGeo(alongZ ? 0.25 : len, 0.15, alongZ ? len : 0.25, 2, 1);
-      addMesh(scene, kg, kerbMat, r.x + (alongZ ? s * (wid / 2 + 0.12) : 0), 0.075, r.z + (alongZ ? 0 : s * (wid / 2 + 0.12)), false, true);
+      addMesh(root, kg, kerbMat, r.x + (alongZ ? side * (wid / 2 + 0.12) : 0), 0.075, r.z + (alongZ ? 0 : side * (wid / 2 + 0.12)), false, true);
     }
   }
 
   const concreteMat = mat(T.concrete());
   const roofMat = mat(T.concrete(), { color: '#d8d0c4' });
   const zincRoof = mat(T.zinc(0.8));
+  const metalMat = mat(T.painted('#455a64'));
   const invisible = new THREE.MeshBasicMaterial({ visible: false });
 
   for (const b of BOXES) {
     const cx = b.x, cy = b.y + b.h / 2, cz = b.z;
     let mesh = null;
     switch (b.k) {
-      case 'wall': mesh = addMesh(scene, boxGeo(b.w, b.h, b.d, 4, 5), [mat(T.wall()), mat(T.wall()), concreteMat, concreteMat, mat(T.wall()), mat(T.wall())], cx, cy, cz); break;
-      case 'concrete': mesh = addMesh(scene, boxGeo(b.w, b.h, b.d, 2), concreteMat, cx, cy, cz); break;
-      case 'monument': mesh = addMesh(scene, boxGeo(b.w, b.h, b.d, b.w, b.h), [mat(T.naija()), mat(T.naija()), concreteMat, concreteMat, mat(T.naija()), mat(T.naija())], cx, cy, cz); break;
-      case 'crate': mesh = addMesh(scene, boxGeo(b.w, b.h, b.d, b.w, b.h), mat(T.crate()), cx, cy, cz); break;
+      case 'wall': mesh = addMesh(root, boxGeo(b.w, b.h, b.d, 4, 5), [mat(T.wall()), mat(T.wall()), concreteMat, concreteMat, mat(T.wall()), mat(T.wall())], cx, cy, cz); break;
+      case 'concrete': mesh = addMesh(root, boxGeo(b.w, b.h, b.d, 2), concreteMat, cx, cy, cz); break;
+      case 'monument': mesh = addMesh(root, boxGeo(b.w, b.h, b.d, b.w, b.h), [mat(T.naija()), mat(T.naija()), concreteMat, concreteMat, mat(T.naija()), mat(T.naija())], cx, cy, cz); break;
+      case 'crate': mesh = addMesh(root, boxGeo(b.w, b.h, b.d, b.w, b.h), mat(T.crate()), cx, cy, cz); break;
       case 'stall': {
-        mesh = addMesh(scene, boxGeo(b.w, b.h, b.d, 1.3), mat(T.wood()), cx, cy, cz);
-        // goods on the table
+        mesh = addMesh(root, boxGeo(b.w, b.h, b.d, 1.3), mat(T.wood()), cx, cy, cz);
         const goodsCols = ['#e53935', '#fdd835', '#43a047', '#fb8c00', '#6d4c41'];
-        for (let i = 0; i < 6; i++) addMesh(scene, new THREE.SphereGeometry(rnd(0.1, 0.18), 6, 5), mat(null, { color: goodsCols[i % 5] }), cx + rnd(-1.1, 1.1), b.y + b.h + 0.1, cz + rnd(-0.5, 0.5), false, false);
+        for (let i = 0; i < 6; i++) addMesh(root, new THREE.SphereGeometry(rnd(0.1, 0.18), 6, 5), mat(null, { color: goodsCols[i % 5] }), cx + rnd(-1.1, 1.1), b.y + b.h + 0.1, cz + rnd(-0.5, 0.5), false, false);
         break;
       }
-      case 'fence': mesh = addMesh(scene, boxGeo(b.w, b.h, b.d, 2, 2), mat(T.zinc(1)), cx, cy, cz); break;
-      case 'parapet': mesh = addMesh(scene, boxGeo(b.w, b.h, b.d, 2), mat(T.painted('#d7ccc8')), cx, cy, cz); break;
-      case 'pole': mesh = addMesh(scene, boxGeo(b.w, b.h, b.d), mat(null, { color: '#444' }), cx, cy, cz); break;
-      case 'pillar': mesh = addMesh(scene, boxGeo(b.w, b.h, b.d, 1, 1), mat(T.stripes('#ffffff', '#c62828', 8)), cx, cy, cz); break;
-      case 'pump': mesh = addMesh(scene, boxGeo(b.w, b.h, b.d, b.w, b.h), mat(T.stripes('#c62828', '#fafafa', 3)), cx, cy, cz); break;
+      case 'fence': mesh = addMesh(root, boxGeo(b.w, b.h, b.d, 2, 2), mat(T.zinc(1)), cx, cy, cz); break;
+      case 'parapet': mesh = addMesh(root, boxGeo(b.w, b.h, b.d, 2), mat(T.painted('#d7ccc8')), cx, cy, cz); break;
+      case 'pole': mesh = addMesh(root, boxGeo(b.w, b.h, b.d), mat(null, { color: '#444' }), cx, cy, cz); break;
+      case 'pillar': mesh = addMesh(root, boxGeo(b.w, b.h, b.d, 1, 1), mat(T.stripes('#ffffff', '#c62828', 8)), cx, cy, cz); break;
+      case 'pump': mesh = addMesh(root, boxGeo(b.w, b.h, b.d, b.w, b.h), mat(T.stripes('#c62828', '#fafafa', 3)), cx, cy, cz); break;
+      case 'metal': mesh = addMesh(root, boxGeo(b.w, b.h, b.d, 2), metalMat, cx, cy, cz); break;
+      case 'sandbag': mesh = addMesh(root, boxGeo(b.w, b.h, b.d, 1, 0.5), mat(T.sandbag()), cx, cy, cz); break;
+      case 'bunker': mesh = addMesh(root, boxGeo(b.w, b.h, b.d, 2), mat(T.painted('#5d6456')), cx, cy, cz); break;
+      case 'container': {
+        const col = b.c || '#c62828';
+        mesh = addMesh(root, boxGeo(b.w, b.h, b.d, b.w, b.h), mat(T.container(col)), cx, cy, cz);
+        if (b.rot) mesh.rotation.y = Math.PI / 2;
+        break;
+      }
       case 'shop': {
         const side = mat(T.painted(b.c)), front = mat(T.shopFront(b.c));
         const mats = [side, side, zincRoof, side, side, side];
         mats[FACE_INDEX[b.sign.face]] = front;
         const faceW = (b.sign.face === 'n' || b.sign.face === 's') ? b.w : b.d;
         const geo = boxGeo(b.w, b.h, b.d, 2.5, b.h);
-        // front face: one tile across the whole face
         const fi = FACE_INDEX[b.sign.face], uv = geo.attributes.uv;
         for (let i = 0; i < 4; i++) { const k = fi * 4 + i; uv.setXY(k, i % 2, i < 2 ? 1 : 0); }
-        mesh = addMesh(scene, geo, mats, cx, cy, cz);
-        // overhanging zinc awning
+        mesh = addMesh(root, geo, mats, cx, cy, cz);
         const aw = new THREE.Mesh(new THREE.BoxGeometry(faceW, 0.06, 1.0), zincRoof);
-        placeOnFace(aw, b, 0.5, b.h - 0.95); aw.castShadow = true; scene.add(aw);
+        placeOnFace(aw, b, 0.5, b.h - 0.95); aw.castShadow = true; root.add(aw);
         break;
       }
       case 'building': {
         const wallMat = mat(T.building(b.c));
-        mesh = addMesh(scene, boxGeo(b.w, b.h, b.d, 4, 3), [wallMat, wallMat, roofMat, roofMat, wallMat, wallMat], cx, cy, cz);
-        // rooftop water tank on taller buildings
-        if (b.h >= 6) { const tank = addMesh(scene, new THREE.CylinderGeometry(0.7, 0.7, 1.4, 12), mat(null, { color: '#263238' }), cx + b.w / 4, b.y + b.h + 0.7, cz - b.d / 4); tank.castShadow = true; }
+        mesh = addMesh(root, boxGeo(b.w, b.h, b.d, 4, 3), [wallMat, wallMat, roofMat, roofMat, wallMat, wallMat], cx, cy, cz);
+        if (b.h >= 6) { const tank = addMesh(root, new THREE.CylinderGeometry(0.7, 0.7, 1.4, 12), mat(null, { color: '#263238' }), cx + b.w / 4, b.y + b.h + 0.7, cz - b.d / 4); tank.castShadow = true; }
         break;
       }
-      case 'keke': { const m = buildKeke(b.rot); m.position.set(b.x, b.y, b.z); scene.add(m); mesh = addMesh(scene, new THREE.BoxGeometry(b.w, b.h, b.d), invisible, cx, cy, cz, false, false); break; }
-      case 'danfo': { const m = buildDanfo(b.rot); m.position.set(b.x, b.y, b.z); scene.add(m); mesh = addMesh(scene, new THREE.BoxGeometry(b.w, b.h, b.d), invisible, cx, cy, cz, false, false); break; }
-      case 'palm': mesh = addMesh(scene, new THREE.BoxGeometry(b.w, b.h, b.d), invisible, cx, cy, cz, false, false); break;
-      default: mesh = addMesh(scene, boxGeo(b.w, b.h, b.d), concreteMat, cx, cy, cz);
+      case 'keke': { const m = buildKeke(b.rot); m.position.set(b.x, b.y, b.z); root.add(m); mesh = addMesh(root, new THREE.BoxGeometry(b.w, b.h, b.d), invisible, cx, cy, cz, false, false); break; }
+      case 'danfo': { const m = buildDanfo(b.rot); m.position.set(b.x, b.y, b.z); root.add(m); mesh = addMesh(root, new THREE.BoxGeometry(b.w, b.h, b.d), invisible, cx, cy, cz, false, false); break; }
+      case 'truck': { const m = buildTruck(b.rot, b.c); m.position.set(b.x, b.y, b.z); root.add(m); mesh = addMesh(root, new THREE.BoxGeometry(b.w, b.h, b.d), invisible, cx, cy, cz, false, false); break; }
+      case 'palm': mesh = addMesh(root, new THREE.BoxGeometry(b.w, b.h, b.d), invisible, cx, cy, cz, false, false); break;
+      default: mesh = addMesh(root, boxGeo(b.w, b.h, b.d), concreteMat, cx, cy, cz);
     }
     colliders.push(mesh);
     if (b.sign) {
@@ -333,38 +395,35 @@ export function buildWorld(scene, renderer, opts = {}) {
       const sw = Math.min(faceW * 0.92, b.k === 'building' ? 9 : 5), sh = b.k === 'building' ? Math.min(1.4, sw / 4) : 0.75;
       const sy = b.k === 'shop' ? b.h - 0.45 : (b.h >= 6 ? b.h - 1.1 : b.h - 0.7);
       const plane = new THREE.Mesh(new THREE.PlaneGeometry(sw, sh), new THREE.MeshLambertMaterial({ map: signTexture(b.sign.text, '', b.sign.bg, b.sign.fg, sw / sh) }));
-      placeOnFace(plane, b, 0.12, sy); scene.add(plane);
+      placeOnFace(plane, b, 0.12, sy); root.add(plane);
     }
   }
 
-  // Free-standing billboards on poles
-  for (const s of BILLBOARDS) {
-    const tex = signTexture(s.text, s.sub, s.bg, s.fg, s.w / s.h);
-    const m = new THREE.Mesh(new THREE.BoxGeometry(s.w, s.h, 0.12), [mat(null, { color: '#333' }), mat(null, { color: '#333' }), mat(null, { color: '#333' }), mat(null, { color: '#333' }), mat(tex), mat(tex)]);
-    m.position.set(s.x, s.y + s.h / 2, s.z); m.rotation.y = s.rot || 0; m.castShadow = true; scene.add(m);
+  for (const sign of BILLBOARDS) {
+    const tex = signTexture(sign.text, sign.sub, sign.bg, sign.fg, sign.w / sign.h);
+    const m = new THREE.Mesh(new THREE.BoxGeometry(sign.w, sign.h, 0.12), [mat(null, { color: '#333' }), mat(null, { color: '#333' }), mat(null, { color: '#333' }), mat(null, { color: '#333' }), mat(tex), mat(tex)]);
+    m.position.set(sign.x, sign.y + sign.h / 2, sign.z); m.rotation.y = sign.rot || 0; m.castShadow = true; root.add(m);
   }
-  // Market umbrellas
   for (const u of UMBRELLAS) {
-    addMesh(scene, new THREE.CylinderGeometry(0.035, 0.035, 2.4, 6), mat(null, { color: '#ddd' }), u.x, 1.2, u.z, false, false);
-    const c = addMesh(scene, new THREE.ConeGeometry(1.7, 0.55, 8, 1, true), new THREE.MeshLambertMaterial({ map: T.stripes(u.c1, u.c2, 8, true), side: THREE.DoubleSide }), u.x, 2.55, u.z, true, false);
+    addMesh(root, new THREE.CylinderGeometry(0.035, 0.035, 2.4, 6), mat(null, { color: '#ddd' }), u.x, 1.2, u.z, false, false);
+    const c = addMesh(root, new THREE.ConeGeometry(1.7, 0.55, 8, 1, true), new THREE.MeshLambertMaterial({ map: T.stripes(u.c1, u.c2, 8, true), side: THREE.DoubleSide }), u.x, 2.55, u.z, true, false);
     c.rotation.y = Math.random();
   }
-  // Filling-station canopies
   for (const c of CANOPIES) {
-    const m = addMesh(scene, boxGeo(c.w, 0.6, c.d, 2, 0.6), [mat(T.stripes(c.c, '#fff', 3)), mat(T.stripes(c.c, '#fff', 3)), mat(null, { color: '#ddd' }), mat(null, { color: '#f5f5f5' }), mat(T.stripes(c.c, '#fff', 3)), mat(T.stripes(c.c, '#fff', 3))], c.x, c.y + 0.3, c.z);
+    const m = addMesh(root, boxGeo(c.w, 0.6, c.d, 2, 0.6), [mat(T.stripes(c.c, '#fff', 3)), mat(T.stripes(c.c, '#fff', 3)), mat(null, { color: '#ddd' }), mat(null, { color: '#f5f5f5' }), mat(T.stripes(c.c, '#fff', 3)), mat(T.stripes(c.c, '#fff', 3))], c.x, c.y + 0.3, c.z);
     m.castShadow = true;
   }
-  // Palms
-  for (const p of PALMS) { const m = buildPalm(p.h); m.position.set(p.x, 0, p.z); scene.add(m); }
+  for (const p of PALMS) { const m = buildPalm(p.h); m.position.set(p.x, 0, p.z); root.add(m); }
 
-  // Distant skyline beyond the walls (visual only)
   const farMat = mat(null, { color: '#9aa7ad' });
   for (let i = 0; i < 40; i++) {
     const ang = (i / 40) * Math.PI * 2, r = rnd(52, 70), hh = rnd(4, 14);
-    addMesh(scene, new THREE.BoxGeometry(rnd(4, 10), hh, rnd(4, 10)), farMat, Math.cos(ang) * r, hh / 2, Math.sin(ang) * r, false, false);
-    if (i % 3 === 0) { const p = buildPalm(rnd(9, 12)); p.position.set(Math.cos(ang + 0.07) * (r - 5), 0, Math.sin(ang + 0.07) * (r - 5)); scene.add(p); }
+    // leave a gap on the west for the Niger backdrop
+    if (RIVERS && RIVERS.length && Math.cos(ang) < -0.7) continue;
+    addMesh(root, new THREE.BoxGeometry(rnd(4, 10), hh, rnd(4, 10)), farMat, Math.cos(ang) * r, hh / 2, Math.sin(ang) * r, false, false);
+    if (i % 3 === 0) { const pal = buildPalm(rnd(9, 12)); pal.position.set(Math.cos(ang + 0.07) * (r - 5), 0, Math.sin(ang + 0.07) * (r - 5)); root.add(pal); }
   }
-  return { colliders };
+  return { colliders, root, map };
 }
 
 // Position an object flat against a box face (offset metres out from the face, at height y above box bottom).

@@ -50,3 +50,9 @@ export function land() { if (!ok()) return; noise(ctx.currentTime, 0.12, 'lowpas
 export function spawn() { if (!ok()) return; const t = ctx.currentTime; tone(t, 0.15, 'triangle', 440, 660, 0.15); tone(t + 0.12, 0.2, 'triangle', 660, 880, 0.15); }
 export function win() { if (!ok()) return; const t = ctx.currentTime; [523, 659, 784, 1046].forEach((f, i) => tone(t + i * 0.15, 0.35, 'triangle', f, f, 0.25)); }
 export function impact() { if (!ok()) return; noise(ctx.currentTime, 0.05, 'bandpass', 3500, 0.15, 2); }
+export function pickup(kind) {
+  if (!ok()) return; const t = ctx.currentTime;
+  const seq = kind === 'armour' ? [392, 523, 659] : kind === 'ammo' ? [330, 440, 554] : [523, 659, 784];
+  seq.forEach((f, i) => tone(t + i * 0.06, 0.14, 'triangle', f, f * 1.05, 0.22));
+}
+export function toast() { /* reserved */ }

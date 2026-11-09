@@ -1,10 +1,11 @@
 // Frontline: Oba — browser client
 import * as THREE from 'three';
 import {
-  MAP_NAME, AABBS, ARENA_HALF, PLAYER_RADIUS as R, PLAYER_HEIGHT as H, EYE_HEIGHT, MAX_HP,
+  DEFAULT_MAP, getMap, PLAYER_RADIUS as R, PLAYER_HEIGHT as H, EYE_HEIGHT, MAX_HP,
   FIRE_INTERVAL, MAG_SIZE, RESERVE_AMMO, RELOAD_MS, RESPAWN_MS,
 } from './shared/map.js';
 import { buildWorld } from './world.js';
+import { createPickupField } from './pickups.js';
 import { Soldier } from './avatar.js';
 import * as sfx from './audio.js';
 import { buildRifle, flashTexture } from './weapon.js';
@@ -14,7 +15,6 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 const $ = id => document.getElementById(id);
 const params = new URLSearchParams(location.search);
-for (const id of ['mapname', 'menumap', 'sbmap']) $(id).textContent = MAP_NAME;
 $('name').value = localStorage.getItem('fps-name') || '';
 
 // ---------- Renderer / scene ----------
@@ -29,7 +29,26 @@ const BASE_FOV = 75, ADS_FOV = 50;
 const camera = new THREE.PerspectiveCamera(BASE_FOV, innerWidth / innerHeight, 0.05, 400);
 camera.rotation.order = 'YXZ';
 scene.add(camera);
-const { colliders } = buildWorld(scene, renderer, { low: isTouch });
+
+let currentMap = getMap(DEFAULT_MAP);
+let AABBS = currentMap.AABBS;
+let ARENA_HALF = currentMap.ARENA_HALF;
+let colliders = [];
+let pickupField = null;
+function setMapName(name) {
+  for (const id of ['mapname', 'menumap', 'sbmap']) { const el = $(id); if (el) el.textContent = name; }
+}
+function loadClientMap(id, pickupList) {
+  currentMap = getMap(id);
+  AABBS = currentMap.AABBS;
+  ARENA_HALF = currentMap.ARENA_HALF;
+  setMapName(currentMap.name);
+  const built = buildWorld(scene, renderer, { low: isTouch, map: currentMap });
+  colliders = built.colliders;
+  pickupField?.dispose();
+  pickupField = createPickupField(scene, pickupList || currentMap.PICKUPS.map((p, i) => ({ ...p, id: i, up: true })));
+}
+loadClientMap(DEFAULT_MAP);
 addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); weaponCamera.aspect = camera.aspect; weaponCamera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
 
 // ---------- First-person weapon (own scene + camera so it never clips into walls) ----------
@@ -61,7 +80,7 @@ rig.position.copy(HIP);
 // ---------- State ----------
 const me = {
   id: null, pos: new THREE.Vector3(), vel: new THREE.Vector3(), yaw: 0, pitch: 0, onGround: true, hp: MAX_HP, alive: false, seq: 0,
-  ammo: MAG_SIZE, reserve: RESERVE_AMMO, reloading: false, reloadEnd: 0, lastShot: 0, recoil: 0, stepT: 0,
+  ammo: MAG_SIZE, reserve: RESERVE_AMMO, armour: 0, reloading: false, reloadEnd: 0, lastShot: 0, recoil: 0, stepT: 0,
 };
 const keys = {}; let mouseDown = false, aiming = false, locked = false, joined = false, ws = null;
 let roster = [], winKills = 20, roundOver = false, deathTimer = 0, roundTimerEnd = 0;
@@ -84,17 +103,23 @@ const handlers = {
   welcome(m) {
     me.id = m.id; me.seq = m.seq; winKills = m.win; roster = m.list; roundOver = m.roundOver;
     me.pos.set(...m.p); me.yaw = m.yaw; me.alive = true; me.hp = MAX_HP;
+    me.armour = m.armour || 0; if (m.reserve != null) me.reserve = m.reserve; if (m.ammo != null) me.ammo = m.ammo;
+    if (m.map) loadClientMap(m.map.id, m.pickups);
     joined = true; $('menu').classList.add('hidden'); $('hud').classList.remove('hidden'); $('sbwin').textContent = winKills;
-    updateScore(); comms.chatLine('', `Welcome to ${MAP_NAME}, ${nameOf(me.id)}! ` + (isTouch ? 'Voice is open-mic — tap 🎤 to mute, CHAT to type.' : 'Voice chat is open-mic — press V to mute/unmute, T to type.'), 'sys');
+    updateScore(); comms.chatLine('', `Welcome to ${currentMap.name}, ${nameOf(me.id)}! ` + (isTouch ? 'Voice is open-mic — tap 🎤 to mute, CHAT to type.' : 'Voice chat is open-mic — press V to mute/unmute, T to type.'), 'sys');
     for (const r of roster) if (r.talk) comms.talking.add(r.id);
     comms.connectVoice(m.list);
+    if (m.vote) showVote(m.vote.maps, m.vote.ms, m.vote.counts);
   },
   roster(m) { roster = m.list; winKills = m.win; for (const r of roster) remotes.get(r.id)?.s.setName(r.name); updateScore(); renderScoreboard(); },
   s(m) {
     const now = performance.now(), seen = new Set();
-    for (const [id, x, y, z, yaw, pitch, hp, alive] of m.ps) {
+    for (const row of m.ps) {
+      const [id, x, y, z, yaw, pitch, hp, armourOrAlive, maybeAlive] = row;
+      const armour = maybeAlive === undefined ? 0 : armourOrAlive;
+      const alive = maybeAlive === undefined ? armourOrAlive : maybeAlive;
       seen.add(id);
-      if (id === me.id) { me.hp = hp; continue; }
+      if (id === me.id) { me.hp = hp; if (maybeAlive !== undefined) me.armour = armour; continue; }
       let r = remotes.get(id);
       if (!r) {
         const info = roster.find(p => p.id === id) || {};
@@ -110,7 +135,9 @@ const handlers = {
   spawn(m) {
     if (m.id === me.id) {
       me.pos.set(...m.p); me.vel.set(0, 0, 0); me.yaw = m.yaw; me.pitch = 0; me.seq = m.seq; me.hp = MAX_HP; me.alive = true;
-      me.ammo = MAG_SIZE; me.reserve = RESERVE_AMMO; me.reloading = false; $('death').classList.add('hidden'); sfx.spawn();
+      me.armour = m.armour != null ? m.armour : 0; me.ammo = m.ammo != null ? m.ammo : MAG_SIZE;
+      if (m.reserve != null) me.reserve = m.reserve;
+      me.reloading = false; $('death').classList.add('hidden'); sfx.spawn();
     } else { const r = remotes.get(m.id); if (r) { r.buf = []; r.s.setAlive(true); r.s.root.position.set(...m.p); } }
   },
   shot(m) {
@@ -128,7 +155,8 @@ const handlers = {
     sfx.hit(m.kill, m.head);
   },
   hurt(m) {
-    me.hp = m.hp; const v = $('vignette'); v.style.opacity = 0.9; setTimeout(() => (v.style.opacity = me.hp < 30 ? 0.45 : 0), 180); sfx.hurt();
+    me.hp = m.hp; if (m.armour != null) me.armour = m.armour;
+    const v = $('vignette'); v.style.opacity = 0.9; setTimeout(() => (v.style.opacity = me.hp < 30 ? 0.45 : 0), 180); sfx.hurt();
   },
   kill(m) {
     const div = document.createElement('div');
@@ -147,8 +175,25 @@ const handlers = {
     $('winner').textContent = m.wid === me.id ? 'VICTORY — YOU WIN THE ROUND!' : `${m.winner} WINS THE ROUND`;
     $('roundend').classList.remove('hidden'); $('death').classList.add('hidden');
     renderScoreboard(); $('scoreboard').classList.remove('hidden'); if (m.wid === me.id) sfx.win();
+    showVote(m.maps, m.ms);
   },
-  roundStart() { roundOver = false; $('roundend').classList.add('hidden'); $('scoreboard').classList.add('hidden'); center('NEW ROUND — FIGHT!'); },
+  roundStart(m) {
+    roundOver = false; hideVote();
+    $('roundend').classList.add('hidden'); $('scoreboard').classList.add('hidden');
+    if (m && m.map) loadClientMap(m.map.id, m.pickups);
+    center(`NEW ROUND — ${currentMap.name}`);
+  },
+  got(m) {
+    if (m.hp != null) me.hp = m.hp;
+    if (m.armour != null) me.armour = m.armour;
+    if (m.reserve != null) me.reserve = m.reserve;
+    pickupField?.setUp(m.id, false);
+    const label = m.kind === 'med' ? '+50 HEALTH' : m.kind === 'armour' ? '+50 ARMOUR' : '+90 AMMO';
+    showToast(label);
+    sfx.pickup(m.kind);
+  },
+  pickup(m) { pickupField?.setUp(m.id, m.up); },
+  votes(m) { updateVoteCounts(m.counts); },
   feed(m) { comms.chatLine('', m.msg, 'sys'); },
   leave(m) { const r = remotes.get(m.id); if (r) { scene.remove(r.s.root); remotes.delete(m.id); } },
 };
@@ -161,6 +206,33 @@ function pushFeed(div) {
 }
 function feedSys(msg) { const d = document.createElement('div'); d.className = 'sys'; d.textContent = msg; pushFeed(d); }
 function center(msg) { const c = $('centermsg'); c.textContent = msg; c.style.opacity = 1; clearTimeout(c._t); c._t = setTimeout(() => (c.style.opacity = 0), 1800); }
+function showToast(msg) {
+  const t = $('toast'); t.textContent = msg; t.classList.remove('hidden');
+  clearTimeout(t._t); t._t = setTimeout(() => t.classList.add('hidden'), 1800);
+}
+let myVote = null;
+function showVote(maps, ms, counts) {
+  const box = $('mapvote'), opts = $('voteopts');
+  if (!box || !maps || !maps.length) return;
+  myVote = null; box.classList.remove('hidden');
+  if (ms) roundTimerEnd = performance.now() + ms;
+  opts.innerHTML = maps.map(m => `<button type="button" class="vote-opt" data-id="${m.id}"><span>${esc(m.name)}</span><span class="vc" data-c="${m.id}">0 votes</span></button>`).join('');
+  opts.onclick = ev => {
+    const b = ev.target.closest('.vote-opt'); if (!b) return;
+    myVote = b.dataset.id;
+    net({ t: 'vote', map: myVote });
+    for (const el of opts.querySelectorAll('.vote-opt')) el.classList.toggle('picked', el.dataset.id === myVote);
+  };
+  if (counts) updateVoteCounts(counts);
+}
+function updateVoteCounts(counts) {
+  if (!counts) return;
+  for (const [id, n] of Object.entries(counts)) {
+    const el = document.querySelector(`#voteopts .vc[data-c="${id}"]`);
+    if (el) el.textContent = `${n} vote${n === 1 ? '' : 's'}`;
+  }
+}
+function hideVote() { const box = $('mapvote'); if (box) box.classList.add('hidden'); myVote = null; }
 function updateScore() {
   const mine = roster.find(r => r.id === me.id); const lead = [...roster].sort((a, b) => b.k - a.k)[0];
   $('score').textContent = `Kills ${mine ? mine.k : 0} / ${winKills}` + (lead ? ` · Leader: ${lead.name} (${lead.k})` : '') + ` · Players ${roster.length}`;
@@ -397,10 +469,18 @@ function frame(now) {
     }
     const targetFov = aiming && me.alive ? ADS_FOV : BASE_FOV;
     if (Math.abs(camera.fov - targetFov) > 0.1) { camera.fov += (targetFov - camera.fov) * Math.min(1, dt * 12); camera.updateProjectionMatrix(); }
+    if (window.__game?.forceView) {
+      const fv = window.__game.forceView;
+      camera.position.set(...fv.pos);
+      camera.lookAt(...fv.look);
+      camera.rotation.z = 0;
+      camera.fov = fv.fov || 70; camera.updateProjectionMatrix();
+      rig.visible = !fv.hideGun;
+    }
     updateViewModel(dt, now, hs);
     // network state @ 30Hz
     sendAcc += dt;
-    if (sendAcc >= 1 / 30 && me.alive) { sendAcc = 0; net({ t: 'st', p: me.pos.toArray().map(v => Math.round(v * 100) / 100), yaw: me.yaw, pitch: me.pitch, seq: me.seq }); }
+    if (sendAcc >= 1 / 30 && me.alive) { sendAcc = 0; net({ t: 'st', p: me.pos.toArray().map(v => Math.round(v * 100) / 100), yaw: me.yaw, pitch: me.pitch, seq: me.seq, ammo: me.ammo, reserve: me.reserve }); }
     // remote interpolation (render 100ms in the past)
     const rt = now - 100;
     for (const r of remotes.values()) {
@@ -416,8 +496,9 @@ function frame(now) {
       r.s.update(dt, r.speed, a.pitch + (c.pitch - a.pitch) * k);
     }
     // HUD
-    $('hpnum').textContent = Math.ceil(me.hp); $('hpfill').style.width = `${me.hp}%`;
+    $('hpnum').textContent = Math.ceil(me.hp); $('hpfill').style.width = `${Math.max(0, Math.min(100, me.hp))}%`;
     $('hpfill').style.background = me.hp < 30 ? '#e53935' : '';
+    $('arnum').textContent = Math.ceil(me.armour); $('arfill').style.width = `${Math.max(0, Math.min(100, me.armour))}%`;
     $('mag').textContent = me.ammo; $('reserve').textContent = me.reserve;
     $('mag').style.color = me.ammo <= 5 ? '#ff5252' : '';
     $('reloading').classList.toggle('hidden', !me.reloading);
@@ -433,6 +514,7 @@ function frame(now) {
     const t = now / 1000 * 0.08;
     camera.position.set(Math.cos(t) * 30, 14, Math.sin(t) * 30); camera.lookAt(0, 2, 0);
   }
+  pickupField?.update(now);
   for (let i = tracers.length - 1; i >= 0; i--) { const tr = tracers[i]; tr.life -= dt; tr.m.material.opacity = Math.max(0, tr.life / 0.08) * 0.85; if (tr.life <= 0) { scene.remove(tr.m); tr.m.material.dispose(); tracers.splice(i, 1); } }
   for (let i = sparks.length - 1; i >= 0; i--) { const s = sparks[i]; s.life -= dt; s.m.material.opacity = s.life / 0.25; s.m.scale.setScalar(1 + (0.25 - s.life) * 4); if (s.life <= 0) { scene.remove(s.m); s.m.material.dispose(); sparks.splice(i, 1); } }
   renderer.clear();
@@ -443,4 +525,4 @@ requestAnimationFrame(frame);
 
 // Test hook: ?autojoin=Name joins immediately (used for headless screenshots)
 if (params.has('autojoin')) { $('name').value = params.get('autojoin') || 'Tester'; join(); }
-window.__game = { me, remotes, comms, anim, rifle, touch, isTouch, setAim: v => { aiming = v; setAiming(v); }, reload: () => startReload(), fire: () => { me.lastShot = 0; shoot(performance.now(), false); }, get joined() { return joined; } };
+window.__game = { me, remotes, comms, anim, rifle, touch, isTouch, camera, scene, setAim: v => { aiming = v; setAiming(v); }, reload: () => startReload(), fire: () => { me.lastShot = 0; shoot(performance.now(), false); }, get joined() { return joined; }, get map() { return currentMap; }, forceView: null };

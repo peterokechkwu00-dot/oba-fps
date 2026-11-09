@@ -2,12 +2,18 @@
 // until a kill, verifying hit / hurt / kill / spawn (respawn) messages flow.
 // Usage: node test/sim.mjs [ws://localhost:3000/ws]
 import WebSocket from 'ws';
+import { spawn as spawnProc } from 'child_process';
+import { fileURLToPath } from 'url';
+import path from 'path';
+import { getMap, listMaps, rayMap, PLAYER_RADIUS as PR, PLAYER_HEIGHT as PH, DEFAULT_MAP } from '../public/shared/map.js';
+
 const URL = process.argv[2] || `ws://localhost:${process.env.PORT || 3000}/ws`;
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const log = (...a) => console.log('[sim]', ...a);
 
-function client(name) {
-  const ws = new WebSocket(URL); const c = { ws, name, msgs: [], seq: 0, id: 0, waiters: [] };
+function client(name, url = URL) {
+  const ws = new WebSocket(url); const c = { ws, name, msgs: [], seq: 0, id: 0, waiters: [] };
   ws.on('message', d => {
     const m = JSON.parse(d); c.msgs.push(m);
     if (m.t === 'welcome') { c.id = m.id; c.seq = m.seq; }
@@ -105,5 +111,180 @@ try {
   check(!!lv, 'leave message shown to remaining players');
   b.ws.close();
 } catch (e) { ok = false; log('ERROR', e.message); }
+
+function overlapsPlayer(x, y, z, a, r = PR, h = PH) {
+  return x + r > a.min[0] && x - r < a.max[0] && z + r > a.min[2] && z - r < a.max[2] && y + h > a.min[1] && y < a.max[1];
+}
+
+log('--- map data ---');
+try {
+  const ids = listMaps().map(m => m.id);
+  check(ids.join(',') === 'oba,onitsha,nnewi,awka', `registry lists four maps (${ids.join(', ')})`);
+  check(DEFAULT_MAP === 'oba', 'default map is oba');
+  for (const { id, name } of listMaps()) {
+    const m = getMap(id);
+    check(m.id === id && m.name === name && m.AABBS.length === m.BOXES.length, `${id}: id/name/aabbs match`);
+    check(m.SPAWNS.length >= 8, `${id}: ${m.SPAWNS.length} spawn points`);
+    const blocked = m.SPAWNS.filter(s => m.AABBS.some(a => overlapsPlayer(s[0], 0, s[1], a)));
+    check(blocked.length === 0, `${id}: all spawns are walkable`);
+    const kinds = { med: 0, armour: 0, ammo: 0 };
+    for (const pk of m.PICKUPS) kinds[pk.kind]++;
+    check(kinds.med >= 3 && kinds.armour >= 2 && kinds.ammo >= 3, `${id}: pickups med=${kinds.med} armour=${kinds.armour} ammo=${kinds.ammo}`);
+    const t = rayMap([0, 20, 0], [0, -1, 0], m.AABBS);
+    check(t < 30, `${id}: downward ray hits geometry (t=${t.toFixed(2)})`);
+  }
+  const through = rayMap([0, 1.6, -6], [0, 0, 1], getMap('oba').AABBS);
+  check(through < 7, `oba monument blocks a shot along +Z from (0,-6) (t=${through.toFixed(2)})`);
+  const w = rayMap([-22, 1.6, -20], [0, 0, -1], getMap('onitsha').AABBS);
+  check(w < 16, `onitsha warehouse blocks a shot north from the lane (t=${w.toFixed(2)})`);
+  const shed = rayMap([0, 1.6, -16], [-1, 0, 0], getMap('nnewi').AABBS);
+  check(shed < 20, `nnewi west shed blocks a shot west from the yard (t=${shed.toFixed(2)})`);
+  const hq = rayMap([0, 1.6, -16], [0, 0, -1], getMap('awka').AABBS);
+  check(hq < 16, `awka HQ blocks a shot north across the parade ground (t=${hq.toFixed(2)})`);
+} catch (e) { ok = false; log('ERROR', e.message); }
+
+function waitListen(child, ms = 8000) {
+  return new Promise((res, rej) => {
+    let buf = '';
+    const t = setTimeout(() => rej(new Error('server start timeout: ' + buf)), ms);
+    const on = d => { buf += d; if (/listening/.test(buf)) { clearTimeout(t); res(); } };
+    child.stdout.on('data', on);
+    child.stderr.on('data', on);
+    child.on('exit', code => { clearTimeout(t); rej(new Error(`server exited ${code}: ${buf}`)); });
+  });
+}
+
+async function withTestServer(env, fn) {
+  const port = Number(env.PORT);
+  const child = spawnProc('node', ['server.js'], {
+    cwd: ROOT,
+    env: { ...process.env, BOTS: '0', ...env, PORT: String(port) },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  try {
+    await waitListen(child);
+    await fn(`ws://127.0.0.1:${port}/ws`);
+  } finally {
+    child.kill('SIGTERM');
+    await sleep(200);
+    try { child.kill('SIGKILL'); } catch {}
+  }
+}
+
+log('--- pickups, armour, regen, map vote ---');
+try {
+  await withTestServer({
+    PORT: 3199, BOTS: 0, WIN_KILLS: 1, VOTE_MS: 1500,
+    MED_RESPAWN: 400, ARM_RESPAWN: 8000, AMMO_RESPAWN: 400,
+    REGEN_DELAY: 400, REGEN_RATE: 20, MAP: 'oba',
+  }, async (url) => {
+    const a = client('Alpha', url), b = client('Bravo', url);
+    await Promise.all([a.open, b.open]);
+    a.send({ t: 'join', name: 'Alpha' }); b.send({ t: 'join', name: 'Bravo' });
+    const wa = await a.wait(m => m.t === 'welcome');
+    const wb = await b.wait(m => m.t === 'welcome');
+    check(wa.map?.id === 'oba' && wb.map?.name === 'Oba, Anambra', `welcome includes map (${wa.map?.id})`);
+    check(Array.isArray(wa.pickups) && wa.pickups.length >= 10, `welcome includes ${wa.pickups.length} pickups`);
+    check(wa.timers?.vote === 1500 && wa.timers?.med === 400, `timers honoured (vote=${wa.timers?.vote}, med=${wa.timers?.med})`);
+
+    const stand = async (c, p, n = 8) => { for (let i = 0; i < n; i++) { pos(c, p); await sleep(40); } };
+
+    // Armour at the junction plinth, then a body shot: 2/3 absorbed, raw dmg still 25
+    const Arm = [3.4, 0, 0];
+    await stand(b, Arm);
+    const gotArm = await b.wait(m => m.t === 'got' && m.kind === 'armour', 3000);
+    check(gotArm.armour === 50, `armour pickup granted 50 (armour=${gotArm.armour})`);
+
+    // Step off the pad immediately so the vest cannot be taken twice
+    const A = [3.4, 0, 10], Bpos = [3.4, 0, 4];
+    pos(b, Bpos);
+    await stand(a, A); await stand(b, Bpos, 6);
+    const o = [A[0], 1.6, A[2]], tgt = [Bpos[0], 1.15, Bpos[2]];
+    const dir = tgt.map((v, i) => v - o[i]); const ln = Math.hypot(...dir);
+    const beforeHits = a.msgs.filter(m => m.t === 'hit').length;
+    a.send({ t: 'shoot', o, d: dir.map(v => v / ln), e: tgt, hit: b.id, head: false });
+    const hurt = await b.wait(m => m.t === 'hurt' && m.hp < 100, 2000);
+    const hit = await a.wait(m => m.t === 'hit' && a.msgs.filter(x => x.t === 'hit').length > beforeHits, 2000);
+    check(hit.dmg === 25, `hit still reports raw damage ${hit.dmg}`);
+    check(hurt.hp === 92 && hurt.armour === 33, `armour absorbed 17 of 25 (hp=${hurt.hp}, armour=${hurt.armour})`);
+
+    // Medkit heals (do this before regen fills health), cap 100, no grant when full
+    const Med = [19, 0, -5];
+    const gots = () => b.msgs.filter(m => m.t === 'got' && m.kind === 'med').length;
+    const nMed = gots();
+    await stand(b, Med);
+    const gotMed = await b.wait(m => m.t === 'got' && m.kind === 'med', 3000);
+    check(gotMed.hp === 100, `medkit healed to cap (hp=${gotMed.hp})`);
+    await sleep(250);
+    check(gots() === nMed + 1, 'full health does not consume another medkit');
+    const disappeared = b.msgs.some(m => m.t === 'pickup' && m.id === gotMed.id && m.up === false);
+    check(disappeared, 'pickup removed for everyone after it was taken');
+    const back = await b.wait(m => m.t === 'pickup' && m.id === gotMed.id && m.up === true, 3000);
+    check(!!back, 'medkit respawned after its timer');
+    await sleep(200);
+    check(gots() === nMed + 1, 'respawned medkit is not taken while health is already full');
+
+    // Regen: step off, take a body shot, wait past the delay
+    const Off = [10, 0, -1.5];
+    await stand(b, Off); await stand(a, [-8, 0, -1.5]);
+    const oR = [-8, 1.6, -1.5], tR = [10, 1.15, -1.5];
+    const dR = tR.map((v, i) => v - oR[i]), lR = Math.hypot(...dR);
+    a.send({ t: 'shoot', o: oR, d: dR.map(v => v / lR), e: tR, hit: b.id, head: false });
+    const hurt2 = await b.wait(m => m.t === 'hurt' && m.hp < 100, 2000);
+    const hp0 = hurt2.hp;
+    const mark = b.msgs.length;
+    await sleep(900);
+    const snap = await b.wait(m => m.t === 's' && b.msgs.indexOf(m) >= mark && m.ps.some(p => p[0] === b.id && p[6] > hp0), 3000);
+    const row = snap.ps.find(p => p[0] === b.id);
+    check(row[6] > hp0, `health regen after delay (hp ${hp0} -> ${row[6]})`);
+
+    // Ammo crate
+    const Ammo = [-5, 0, 6];
+    await stand(b, [0, 0, 6]); // step off the med
+    await stand(b, Ammo);
+    const gotAmmo = await b.wait(m => m.t === 'got' && m.kind === 'ammo', 3000);
+    check(gotAmmo.reserve === 240, `ammo pickup +90 reserve (reserve=${gotAmmo.reserve})`);
+
+    // First kill wins the round (WIN_KILLS=1). Bravo may have leftover armour — shoot until dead.
+    await stand(a, [-8, 0, -1.5]); await stand(b, [8, 0, -1.5]);
+    const o2 = [-8, 1.6, -1.5], t2 = [8, 1.15, -1.5];
+    const d2 = t2.map((v, i) => v - o2[i]); const l2 = Math.hypot(...d2);
+    for (let i = 0; i < 12; i++) {
+      pos(a, [-8, 0, -1.5], -Math.PI / 2); pos(b, [8, 0, -1.5], Math.PI / 2);
+      a.send({ t: 'shoot', o: o2, d: d2.map(v => v / l2), e: t2, hit: b.id, head: false });
+      await sleep(120);
+      if (a.msgs.some(m => m.t === 'roundEnd')) break;
+    }
+    const end = await a.wait(m => m.t === 'roundEnd', 4000);
+    check(end.maps?.length === 3 && end.maps.every(m => m.id !== 'oba'), `vote offers the 3 other maps (${(end.maps || []).map(m => m.id).join(', ')})`);
+    check(end.ms === 1500, `vote window is 15s (test: ${end.ms}ms)`);
+    a.send({ t: 'vote', map: 'onitsha' });
+    b.send({ t: 'vote', map: 'onitsha' });
+    const vc = await a.wait(m => m.t === 'votes' && m.counts?.onitsha >= 2, 2000);
+    check(vc.counts.onitsha === 2, `both votes counted (onitsha=${vc.counts.onitsha})`);
+    const rs = await a.wait(m => m.t === 'roundStart', 3000);
+    check(rs.map?.id === 'onitsha' && Array.isArray(rs.pickups) && rs.pickups.length > 0, `round starts on the voted map (${rs.map?.id})`);
+    const sp = await b.wait(m => m.t === 'spawn' && m.id === b.id && m.seq > 1, 2000);
+    const onitshaSpawns = getMap('onitsha').SPAWNS;
+    const onSpawn = onitshaSpawns.some(s => Math.abs(s[0] - sp.p[0]) < 0.01 && Math.abs(s[1] - sp.p[2]) < 0.01);
+    check(onSpawn, `post-switch spawn is on the new map (${sp.p.map(v => v.toFixed(1)).join(', ')})`);
+
+    // Wall check on the new map: warehouse A occupies z ≈ -39.5..-32.5 at x=-22
+    b.seq = sp.seq;
+    const Ah = [-22, 0, -20], Bh = [-22, 0, -38];
+    // Bravo may be blocked at -38 (inside warehouse). Place him south of the far wall, north of the warehouse? 
+    // Instead shoot through the warehouse from the lane toward a player standing past it, near the north wall.
+    // Player at z=-38 is inside the warehouse AABB (z -39.5..-32.5) — server still accepts position clamp but collision isn't applied to st.
+    // The wall check uses rayMap, so a shot from z=-20 to z=-38 should be blocked.
+    for (let i = 0; i < 6; i++) { pos(a, Ah, 0); pos(b, Bh, Math.PI); await sleep(35); }
+    const o3 = [-22, 1.6, -20], d3 = [0, 1.15 - 1.6, -38 - -20], l3 = Math.hypot(...d3);
+    const nHit = a.msgs.filter(m => m.t === 'hit').length;
+    a.send({ t: 'shoot', o: o3, d: d3.map(v => v / l3), e: [-22, 1.15, -38], hit: b.id, head: false });
+    await sleep(400);
+    check(a.msgs.filter(m => m.t === 'hit').length === nHit, 'shot through Onitsha warehouse was rejected (per-map collision)');
+    a.ws.close(); b.ws.close();
+  });
+} catch (e) { ok = false; log('ERROR', e.message); }
+
 log(ok ? 'ALL TESTS PASSED' : 'SOME TESTS FAILED');
 process.exit(ok ? 0 : 1);
