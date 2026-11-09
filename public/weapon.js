@@ -2,6 +2,7 @@
 // Origin sits just above the pistol grip. buildRifle('high') is the first-person view model,
 // buildRifle('low') is a cheaper version for other players (cached and cloned).
 import * as THREE from 'three';
+import { RIFLE_SKINS } from './shared/catalog.js';
 
 const rnd = (a, b) => a + Math.random() * (b - a);
 function canvasTex(w, h, draw, srgb = true) {
@@ -94,7 +95,8 @@ const cylZ = (r1, r2, len, seg = 16, open = false) => new THREE.CylinderGeometry
 function build(detail) {
   const m = materials(); const hi = detail === 'high';
   const root = new THREE.Group(); root.name = 'rifle';
-  const add = (geo, mat, x = 0, y = 0, z = 0, parent = root) => { const me = new THREE.Mesh(geo, mat); me.position.set(x, y, z); me.castShadow = !hi; parent.add(me); return me; };
+  const partOf = mat => { for (const k of ['metal','black','polymer','wood','mag','glass','dot','bore']) if (mat === m[k]) return k; return 'metal'; };
+  const add = (geo, mat, x = 0, y = 0, z = 0, parent = root) => { const me = new THREE.Mesh(geo, mat); me.userData.part = partOf(mat); me.position.set(x, y, z); me.castShadow = !hi; parent.add(me); return me; };
   const seg = hi ? 18 : 8;
 
   // Receiver + dust cover
@@ -178,4 +180,19 @@ export function buildRifle(detail = 'high') {
   const g = cache.low.clone(true);
   g.userData = { muzzle: g.children[g.children.length - 1] };
   return g;
+}
+
+export function applyRifleSkin(root, skinId) {
+  if (!root) return;
+  const skin = RIFLE_SKINS[skinId] || RIFLE_SKINS.rifle_standard;
+  root.traverse(o => {
+    if (!o.isMesh || !o.material) return;
+    const part = o.userData.part;
+    if (!part || !skin[part]) return;
+    if (!o.userData._skinned) {
+      o.material = o.material.clone();
+      o.userData._skinned = true;
+    }
+    o.material.color = new THREE.Color(skin[part]);
+  });
 }

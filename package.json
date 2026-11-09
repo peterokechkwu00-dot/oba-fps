@@ -6,11 +6,16 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test": "node test/sim.mjs"
+    "test": "node test/sim.mjs && node test/account.mjs"
   },
-  "engines": { "node": ">=18" },
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
+    "@electric-sql/pglite": "^0.5.16",
+    "bcryptjs": "^3.0.3",
     "express": "^4.21.2",
+    "pg": "^8.23.1",
     "three": "^0.170.0",
     "ws": "^8.18.0"
   }

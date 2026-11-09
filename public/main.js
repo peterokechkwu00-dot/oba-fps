@@ -7,8 +7,10 @@ import {
 import { buildWorld } from './world.js';
 import { createPickupField } from './pickups.js';
 import { Soldier, preloadSoldiers, setSoldierQuality } from './avatar.js';
+import { initAccount, currentLoadout } from './account.js';
+import { getItem } from './shared/catalog.js';
 import * as sfx from './audio.js';
-import { buildRifle, flashTexture } from './weapon.js';
+import { buildRifle, flashTexture, applyRifleSkin } from './weapon.js';
 import * as comms from './comms.js';
 import { isTouch, state as touch, LOOK_SENS, initTouch, requestImmersive, setTouchVisible, setAiming, refreshMic } from './touch.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
@@ -100,6 +102,11 @@ function connect(name) {
 }
 const net = m => { if (ws && ws.readyState === 1) ws.send(JSON.stringify(m)); };
 
+function applyRemoteCosmetics(s, info) {
+  if (!s || !info) return;
+  s.setCosmetics({ camo: info.camo, rifle: info.rifle, tag: info.tag });
+}
+
 const handlers = {
   welcome(m) {
     me.id = m.id; me.seq = m.seq; winKills = m.win; roster = m.list; roundOver = m.roundOver;
@@ -110,9 +117,10 @@ const handlers = {
     updateScore(); comms.chatLine('', `Welcome to ${currentMap.name}, ${nameOf(me.id)}! ` + (isTouch ? 'Voice is open-mic — tap 🎤 to mute, CHAT to type.' : 'Voice chat is open-mic — press V to mute/unmute, T to type.'), 'sys');
     for (const r of roster) if (r.talk) comms.talking.add(r.id);
     comms.connectVoice(m.list);
+    applyRifleSkin(rifle, (m.cosmetics && m.cosmetics.rifle) || currentLoadout().rifle);
     if (m.vote) showVote(m.vote.maps, m.vote.ms, m.vote.counts);
   },
-  roster(m) { roster = m.list; winKills = m.win; for (const r of roster) remotes.get(r.id)?.s.setName(r.name); updateScore(); renderScoreboard(); },
+  roster(m) { roster = m.list; winKills = m.win; for (const r of roster) { const rem = remotes.get(r.id); if (rem) { rem.s.setName(r.name); applyRemoteCosmetics(rem.s, r); } } updateScore(); renderScoreboard(); },
   s(m) {
     const now = performance.now(), seen = new Set();
     for (const row of m.ps) {
@@ -124,8 +132,10 @@ const handlers = {
       let r = remotes.get(id);
       if (!r) {
         const info = roster.find(p => p.id === id) || {};
-        r = { s: new Soldier(id, info.name || `#${id}`, info.c), buf: [], speed: 0, last: new THREE.Vector3(x, y, z) };
+        const tint = getItem(info.camo)?.color || info.c;
+        r = { s: new Soldier(id, info.name || `#${id}`, tint), buf: [], speed: 0, last: new THREE.Vector3(x, y, z) };
         scene.add(r.s.root); remotes.set(id, r); r.s.root.position.set(x, y, z); r.s.setSpeaking(comms.talking.has(id));
+        applyRemoteCosmetics(r.s, info);
       }
       r.buf.push({ t: now, x, y, z, yaw, pitch });
       if (r.buf.length > 40) r.buf.shift();
@@ -526,6 +536,10 @@ function frame(now) {
   if (joined && rig.visible) { renderer.clearDepth(); renderer.render(weaponScene, weaponCamera); }
 }
 requestAnimationFrame(frame);
+
+initAccount({
+  onLoadoutChange(load) { applyRifleSkin(rifle, load.rifle); },
+});
 
 // Test hook: ?autojoin=Name joins immediately (used for headless screenshots)
 if (params.has('autojoin')) { $('name').value = params.get('autojoin') || 'Tester'; join(); }

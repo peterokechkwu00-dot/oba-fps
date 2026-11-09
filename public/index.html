@@ -67,19 +67,67 @@
   <div class="panel">
     <h1>FRONTLINE</h1>
     <div class="subtitle">Online multiplayer FPS · Map: <b id="menumap"></b></div>
-    <input id="name" maxlength="16" placeholder="Enter your callsign" autocomplete="off" />
-    <button id="play">DEPLOY</button>
-    <div id="status"></div>
-    <div class="controls desktop-only">
-      <div><b>WASD</b> move</div><div><b>Mouse</b> look</div><div><b>Space</b> jump</div><div><b>Shift</b> sprint</div>
-      <div><b>Left click</b> shoot</div><div><b>Right click</b> aim</div><div><b>R</b> reload</div><div><b>Tab</b> scoreboard</div><div><b>T / Enter</b> text chat</div><div><b>V</b> mute / unmute mic</div>
+    <nav class="menu-tabs" aria-label="Menu sections">
+      <button type="button" data-tab="play" class="on">Play</button>
+      <button type="button" data-tab="account">Account</button>
+      <button type="button" data-tab="profile">Profile</button>
+      <button type="button" data-tab="shop">Shop</button>
+      <button type="button" data-tab="board">Board</button>
+    </nav>
+
+    <div id="tab-play" class="tabpane">
+      <input id="name" maxlength="16" placeholder="Enter your callsign" autocomplete="off" />
+      <button id="play">DEPLOY</button>
+      <div id="status"></div>
+      <div class="controls desktop-only">
+        <div><b>WASD</b> move</div><div><b>Mouse</b> look</div><div><b>Space</b> jump</div><div><b>Shift</b> sprint</div>
+        <div><b>Left click</b> shoot</div><div><b>Right click</b> aim</div><div><b>R</b> reload</div><div><b>Tab</b> scoreboard</div><div><b>T / Enter</b> text chat</div><div><b>V</b> mute / unmute mic</div>
+      </div>
+      <div class="controls mobile-only">
+        <div><b>Left thumb</b> move (push far to sprint)</div><div><b>Right drag</b> look</div>
+        <div><b>FIRE</b> hold to shoot</div><div><b>AIM</b> sights</div>
+        <div><b>JUMP</b> / <b>R</b> reload</div><div><b>CHAT</b> · <b>🎤</b> mute · <b>TAB</b></div>
+      </div>
+      <div class="tip">Voice chat is on by default: your browser will ask for the microphone when you deploy.<br><span class="mobile-only">On a phone, on-screen joystick and buttons appear after DEPLOY. Landscape is recommended.</span><span class="desktop-only">Share this page's link with friends so they can join the same match.</span></div>
     </div>
-    <div class="controls mobile-only">
-      <div><b>Left thumb</b> move (push far to sprint)</div><div><b>Right drag</b> look</div>
-      <div><b>FIRE</b> hold to shoot</div><div><b>AIM</b> sights</div>
-      <div><b>JUMP</b> / <b>R</b> reload</div><div><b>CHAT</b> · <b>🎤</b> mute · <b>TAB</b></div>
+
+    <div id="tab-account" class="tabpane hidden">
+      <p id="acct-signed" class="hint">Play as a guest, or create an account to save progress and buy skins.</p>
+      <button type="button" id="acct-logout" class="ghost hidden">Log out</button>
+      <div id="acct-forms">
+        <form id="acct-login" class="acct-form">
+          <h3>Log in</h3>
+          <input id="li-user" name="username" maxlength="16" placeholder="Username" autocomplete="username" />
+          <input id="li-pass" name="password" type="password" maxlength="72" placeholder="Password" autocomplete="current-password" />
+          <button type="submit">Log in</button>
+          <div id="acct-login-msg" class="acct-msg"></div>
+        </form>
+        <form id="acct-signup" class="acct-form">
+          <h3>Sign up</h3>
+          <input id="su-user" name="username" maxlength="16" placeholder="Username (3–16, letters/numbers/_)" autocomplete="username" />
+          <input id="su-pass" name="password" type="password" maxlength="72" placeholder="Password (8+ characters)" autocomplete="new-password" />
+          <input id="su-email" name="email" type="email" maxlength="120" placeholder="Email (optional, needed to buy)" autocomplete="email" />
+          <button type="submit">Create account</button>
+          <div id="acct-signup-msg" class="acct-msg"></div>
+        </form>
+      </div>
     </div>
-    <div class="tip">Voice chat is on by default: your browser will ask for the microphone when you deploy.<br><span class="mobile-only">On a phone, on-screen joystick and buttons appear after DEPLOY. Landscape is recommended.</span><span class="desktop-only">Share this page's link with friends so they can join the same match.</span></div>
+
+    <div id="tab-profile" class="tabpane hidden">
+      <div id="profile-body"></div>
+    </div>
+
+    <div id="tab-shop" class="tabpane hidden">
+      <p id="shop-note" class="acct-msg"></p>
+      <input id="pay-email" type="email" maxlength="120" class="hidden" placeholder="Email for Paystack receipt" autocomplete="email" />
+      <div id="shop-body"></div>
+    </div>
+
+    <div id="tab-board" class="tabpane hidden">
+      <h3>Global leaderboard</h3>
+      <p class="hint">Top 20 by XP. Wins and kills also shown.</p>
+      <div id="board-body"></div>
+    </div>
   </div>
 </div>
 <script type="module" src="/main.js"></script>

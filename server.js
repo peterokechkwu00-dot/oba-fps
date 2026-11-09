@@ -11,6 +11,11 @@ import {
   AMMO_GIVE, MED_HEAL, ARMOUR_GIVE, ARMOUR_ABSORB, REGEN_DELAY, REGEN_RATE,
   PICKUP_RADIUS, MED_RESPAWN, ARM_RESPAWN, AMMO_RESPAWN,
 } from './public/shared/map.js';
+import { getItem } from './public/shared/catalog.js';
+import { initDb, dbReady } from './lib/db.js';
+import { mountAuth, accountFromCookie } from './lib/auth.js';
+import { mountShop, paystackWebhookHandler, paymentsEnabled } from './lib/shop.js';
+import { recordKill, recordDeath, recordMatch } from './lib/progress.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT) || 3000;
@@ -27,6 +32,11 @@ const REGEN_DELAY_MS = Number(process.env.REGEN_DELAY) || REGEN_DELAY;
 const REGEN_HP_S = Number(process.env.REGEN_RATE) || REGEN_RATE;
 
 const app = express();
+app.set('trust proxy', 1);
+app.post('/api/paystack/webhook', express.raw({ type: 'application/json' }), paystackWebhookHandler);
+app.use(express.json({ limit: '32kb' }));
+mountAuth(app);
+mountShop(app);
 app.use('/vendor/jsm', express.static(path.join(__dirname, 'node_modules/three/examples/jsm'), { maxAge: '7d' }));
 app.use('/vendor/three', express.static(path.join(__dirname, 'node_modules/three/build'), { maxAge: '7d' }));
 app.use(express.static(path.join(__dirname, 'public'), {
@@ -39,6 +49,8 @@ app.get('/health', (_req, res) => res.json({
   players: [...players.values()].filter(p => !p.bot).length,
   map: map.id,
   name: map.name,
+  db: dbReady,
+  payments: paymentsEnabled(),
 }));
 
 const server = http.createServer(app);
@@ -81,7 +93,10 @@ function broadcast(m, except) {
   const s = JSON.stringify(m);
   for (const p of players.values()) if (p.ws && p !== except && p.ws.readyState === 1) p.ws.send(s);
 }
-const roster = () => [...players.values()].map(p => ({ id: p.id, name: p.name, k: p.kills, d: p.deaths, bot: !!p.bot, c: p.color, talk: !!p.talking }));
+const roster = () => [...players.values()].map(p => ({
+  id: p.id, name: p.name, k: p.kills, d: p.deaths, bot: !!p.bot, c: p.color, talk: !!p.talking,
+  camo: p.camo || null, rifle: p.rifle || null, tag: p.tag || null,
+}));
 const sendRoster = () => broadcast({ t: 'roster', list: roster(), win: WIN_KILLS });
 const humans = () => [...players.values()].filter(p => !p.bot).length;
 const eye = p => [p.p[0], p.p[1] + EYE_HEIGHT, p.p[2]];
@@ -99,6 +114,7 @@ function createPlayer(name, ws, bot = false) {
     alive: false, kills: 0, deaths: 0, seq: 0,
     lastShot: 0, respawnAt: 0, lastHurt: 0,
     wp: null, nextShot: 0, seenAt: 0, strafe: 1,
+    accountId: null, camo: null, rifle: null, tag: null,
   };
   players.set(id, p);
   spawn(p);
@@ -155,7 +171,8 @@ function damage(att, tgt, dmg, head) {
   send(tgt.ws, { t: 'hurt', by: att.id, dmg: raw, hp: tgt.hp, armour: tgt.armour, from: att.p });
   if (!kill) return;
   tgt.alive = false; tgt.deaths++; tgt.respawnAt = Date.now() + RESPAWN_MS; tgt.armour = 0;
-  if (att !== tgt) att.kills++;
+  if (att !== tgt) { att.kills++; recordKill(att.accountId); }
+  recordDeath(tgt.accountId);
   broadcast({ t: 'kill', killer: att.id, victim: tgt.id, head, kn: att.name, vn: tgt.name });
   sendRoster();
   if (att.kills >= WIN_KILLS) endRound(att);
@@ -168,6 +185,8 @@ function endRound(winner) {
   const ms = VOTE_MS;
   roundEndsAt = Date.now() + ms;
   broadcast({ t: 'roundEnd', winner: winner.name, wid: winner.id, list: roster(), ms, maps: voteOptionsArr, current: mapInfo() });
+  const participants = [...players.values()].filter(p => !p.bot && p.accountId).map(p => p.accountId);
+  recordMatch(winner.accountId, participants);
   setTimeout(finishVote, ms);
 }
 
@@ -247,22 +266,35 @@ function removePlayer(p) {
 const num = v => typeof v === 'number' && Number.isFinite(v);
 const vec3 = v => Array.isArray(v) && v.length === 3 && v.every(num);
 
-wss.on('connection', ws => {
+wss.on('connection', (ws, req) => {
   let me = null;
+  const sessionReady = accountFromCookie(req.headers.cookie).catch(() => null);
   ws.on('message', raw => {
     let m; try { m = JSON.parse(raw); } catch { return; }
     if (!m || typeof m.t !== 'string') return;
     if (m.t === 'join') {
       if (me) return;
-      me = createPlayer(m.name, ws);
+      sessionReady.then(acc => {
+      if (me) return;
+      me = createPlayer(acc ? acc.username : m.name, ws);
+      if (acc) {
+        me.accountId = acc.id;
+        me.camo = acc.camo;
+        me.rifle = acc.rifle;
+        me.tag = acc.tag;
+        const skin = getItem(acc.camo);
+        if (skin?.color) me.color = skin.color;
+      }
       send(ws, {
         t: 'welcome', id: me.id, seq: me.seq, p: me.p, yaw: me.yaw, win: WIN_KILLS, list: roster(),
         roundOver, map: mapInfo(), pickups: pickupPayload(), maps: listMaps(),
         armour: me.armour, ammo: me.ammo, reserve: me.reserve, timers: timers(),
         vote: roundOver ? { maps: voteOptionsArr, ms: Math.max(0, roundEndsAt - Date.now()), counts: voteCounts() } : null,
+        cosmetics: { camo: me.camo, rifle: me.rifle, tag: me.tag },
       });
       broadcast({ t: 'feed', msg: `${me.name} joined` }, me);
       sendRoster();
+      }).catch(err => console.error('join', err));
       return;
     }
     if (!me) return;
@@ -398,4 +430,9 @@ setInterval(() => {
   });
 }, 1000 / TICK_HZ);
 
-server.listen(PORT, () => console.log(`Frontline FPS server listening on http://localhost:${PORT} (map: ${map.name}, bots: ${BOT_COUNT}, win: ${WIN_KILLS} kills)`));
+initDb().then(() => {
+  server.listen(PORT, () => console.log(`Frontline FPS server listening on http://localhost:${PORT} (map: ${map.name}, bots: ${BOT_COUNT}, win: ${WIN_KILLS} kills, db: ${dbReady})`));
+}).catch(err => {
+  console.error('Failed to start:', err);
+  process.exit(1);
+});

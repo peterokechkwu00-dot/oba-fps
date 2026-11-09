@@ -3,7 +3,8 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 import { HEAD_Y } from './shared/map.js';
-import { buildRifle } from './weapon.js';
+import { buildRifle, applyRifleSkin } from './weapon.js';
+import { getItem } from './shared/catalog.js';
 
 export let lowDetail = false;
 export function setSoldierQuality(low) { lowDetail = !!low; }
@@ -49,16 +50,37 @@ function speakerSprite() {
   s.scale.set(0.32, 0.32, 1); s.position.set(-0.98, 0, 0); s.visible = false; s.renderOrder = 3; return s;
 }
 
-function nameSprite(name) {
+function nameSprite(name, color = '#ff5a4f') {
   const c = document.createElement('canvas'); c.width = 256; c.height = 64;
   const g = c.getContext('2d');
   g.fillStyle = 'rgba(0,0,0,0.45)'; g.fillRect(0, 8, 256, 48);
   g.font = 'bold 30px Arial'; g.textAlign = 'center'; g.textBaseline = 'middle';
-  g.fillStyle = '#ff5a4f'; g.fillText(name.slice(0, 18), 128, 33);
+  g.fillStyle = color || '#ff5a4f'; g.fillText(name.slice(0, 18), 128, 33);
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
   const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: t, depthTest: false, transparent: true }));
   s.scale.set(1.6, 0.4, 1); s.renderOrder = 3;
   return s;
+}
+
+
+let ankaraTex = null;
+function ankaraTexture() {
+  if (ankaraTex) return ankaraTex;
+  const c = document.createElement('canvas'); c.width = c.height = 256;
+  const g = c.getContext('2d');
+  const colors = ['#c62828', '#f9a825', '#1b7a3a', '#1565c0', '#6a1b9a', '#fff8e1'];
+  g.fillStyle = '#1b5e20'; g.fillRect(0, 0, 256, 256);
+  for (let y = 0; y < 256; y += 32) {
+    for (let x = 0; x < 256; x += 32) {
+      g.fillStyle = colors[(x / 32 + y / 32 | 0) % colors.length];
+      g.beginPath(); g.moveTo(x + 16, y); g.lineTo(x + 32, y + 16); g.lineTo(x + 16, y + 32); g.lineTo(x, y + 16); g.fill();
+    }
+  }
+  ankaraTex = new THREE.CanvasTexture(c);
+  ankaraTex.colorSpace = THREE.SRGBColorSpace;
+  ankaraTex.wrapS = ankaraTex.wrapT = THREE.RepeatWrapping;
+  ankaraTex.repeat.set(3, 3);
+  return ankaraTex;
 }
 
 const hitMat = new THREE.MeshBasicMaterial({ visible: false });
@@ -92,7 +114,9 @@ function tintMaterials(root, color) {
     const next = mats.map(m => {
       const c = m.clone();
       const isVisor = /visor/i.test(o.name || '') || /visor/i.test(c.name || '');
-      c.color = (c.color ? c.color.clone() : new THREE.Color('#fff')).multiply(isVisor ? visorTint : bodyTint);
+      if (!c.userData) c.userData = {};
+      if (!c.userData.baseColor) c.userData.baseColor = (c.color ? c.color.clone() : new THREE.Color('#fff'));
+      c.color = c.userData.baseColor.clone().multiply(isVisor ? visorTint : bodyTint);
       return c;
     });
     o.material = Array.isArray(o.material) ? next : next[0];
@@ -232,7 +256,9 @@ export class Soldier {
     }
 
     this.tagAnchor = new THREE.Group(); this.tagAnchor.position.y = 2.15; this.root.add(this.tagAnchor);
-    this.tag = nameSprite(name); this.tagAnchor.add(this.tag);
+    this.tagColor = '#ff5a4f';
+    this.cosmetics = { camo: null, rifle: null, tag: null };
+    this.tag = nameSprite(name, this.tagColor); this.tagAnchor.add(this.tag);
     this.speaker = speakerSprite(); this.tagAnchor.add(this.speaker);
 
     if (proto || protoError) this._assemble();
@@ -324,6 +350,7 @@ export class Soldier {
     }
     if (this.actions.idle) { this.actions.idle.setEffectiveWeight(1); this.actions.idle.play(); this.currentClip = 'idle'; }
     this.ready = true;
+    if (this.cosmetics) this.setCosmetics(this.cosmetics);
   }
 
   _assembleFallback() {
@@ -347,12 +374,46 @@ export class Soldier {
     this.flash = new THREE.Mesh(new THREE.SphereGeometry(0.07, 6, 6), new THREE.MeshBasicMaterial({ color: '#ffd27a' }));
     this.flash.position.z = -0.03; this.flash.visible = false; this.rifle.userData.muzzle.add(this.flash);
     this.ready = true; this.fallback = true;
+    if (this.cosmetics) this.setCosmetics(this.cosmetics);
   }
 
   setName(name) {
     if (name === this.name) return; this.name = name;
     this.tagAnchor.remove(this.tag); if (this.tag.material.map) this.tag.material.map.dispose();
-    this.tag = nameSprite(name); this.tagAnchor.add(this.tag);
+    this.tag = nameSprite(name, this.tagColor); this.tagAnchor.add(this.tag);
+  }
+  setTagColor(color) {
+    if (!color || color === this.tagColor) return;
+    this.tagColor = color;
+    this.tagAnchor.remove(this.tag); if (this.tag.material.map) this.tag.material.map.dispose();
+    this.tag = nameSprite(this.name, this.tagColor); this.tagAnchor.add(this.tag);
+  }
+  setCamo(color, pattern) {
+    if (!this.model) { this._pendingCamo = { color, pattern }; return; }
+    const tint = new THREE.Color(color || this.color);
+    this.color = color || this.color;
+    this.model.traverse(o => {
+      if (!o.isMesh) return;
+      const mats = Array.isArray(o.material) ? o.material : [o.material];
+      for (const c of mats) {
+        if (!c || !c.color) continue;
+        const base = (c.userData && c.userData.baseColor) ? c.userData.baseColor : new THREE.Color('#ffffff');
+        c.color.copy(base).multiply(tint);
+        if (pattern === 'ankara') { c.map = ankaraTexture(); c.needsUpdate = true; }
+      }
+    });
+  }
+  setRifleSkin(id) {
+    this._rifleSkin = id;
+    if (this.rifle) applyRifleSkin(this.rifle, id);
+  }
+  setCosmetics(c = {}) {
+    this.cosmetics = { camo: c.camo || this.cosmetics?.camo, rifle: c.rifle || this.cosmetics?.rifle, tag: c.tag || this.cosmetics?.tag };
+    const camo = getItem(this.cosmetics.camo);
+    if (camo) this.setCamo(camo.color, camo.pattern);
+    if (this.cosmetics.rifle) this.setRifleSkin(this.cosmetics.rifle);
+    const tag = getItem(this.cosmetics.tag);
+    if (tag?.color) this.setTagColor(tag.color);
   }
   setSpeaking(on) { this.speaker.visible = !!on && this.alive; }
   muzzle() { if (this.flash) { this.flash.visible = true; this.flashT = 0.05; } this.recoil = Math.min(1, this.recoil + 0.65); }

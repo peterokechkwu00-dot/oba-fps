@@ -173,3 +173,63 @@ body.touch.portrait #btnAim { right: calc(max(12px, env(safe-area-inset-right)) 
 body.touch.portrait #btnReload { right: calc(max(12px, env(safe-area-inset-right)) + 92px); bottom: calc(max(16px, env(safe-area-inset-bottom)) + 90px); }
 
 body.touch #chatinput, body.touch #name { font-size: 16px; }
+
+/* Account / shop / profile (menu) */
+.panel { max-height: min(100dvh, 940px); overflow-y: auto; -webkit-overflow-scrolling: touch; width: min(560px, 96vw); }
+.menu-tabs { display: flex; gap: 4px; margin: 0 0 16px; flex-wrap: wrap; justify-content: center; }
+.menu-tabs button { flex: 1 1 0; min-width: 64px; padding: 10px 8px; font-size: 13px; font-weight: bold; letter-spacing: 0.4px; color: #c9e265; background: #1a2414; border: 1px solid #3d5a2d; border-radius: 6px; cursor: pointer; }
+.menu-tabs button.on, .menu-tabs button:hover { background: #6f8f2a; color: #fff; border-color: #6f8f2a; }
+.tabpane h3 { margin: 12px 0 8px; color: #c9e265; font-size: 16px; letter-spacing: 1px; text-align: left; }
+.acct-form { text-align: left; margin-top: 12px; padding-top: 12px; border-top: 1px solid #2a3a22; }
+.acct-form input, #pay-email, #li-user, #li-pass, #su-user, #su-pass, #su-email {
+  width: 100%; padding: 12px; margin-top: 8px; font-size: 16px; background: #121812; color: #fff;
+  border: 1px solid #4e6b3a; border-radius: 6px; outline: none; text-align: left;
+}
+.acct-form button, #acct-logout, .item-card button {
+  margin-top: 10px; width: 100%; padding: 12px; font-size: 16px; font-weight: bold;
+  background: #6f8f2a; color: #fff; border: 0; border-radius: 6px; cursor: pointer;
+}
+.acct-form button:hover, .item-card button:hover { background: #87ab35; }
+button.ghost, #acct-logout { background: #2a2a2a; border: 1px solid #555; }
+.item-card button:disabled, .acct-form button:disabled { opacity: 0.65; cursor: default; background: #3a4a28; }
+.item-card button.eq { background: #2e4a20; }
+.item-card button.buy { background: #b8860b; }
+.item-card button.buy:hover { background: #d4a017; }
+.acct-msg { min-height: 18px; margin-top: 8px; font-size: 13px; color: #ffb74d; }
+.acct-msg.ok { color: #c9e265; }
+.acct-msg.err { color: #ff8a80; }
+.hint { color: #8a9a7a; font-size: 13px; text-align: left; }
+.profile-name { font-size: 28px; font-weight: bold; color: #c9e265; letter-spacing: 2px; }
+.profile-level { margin-top: 4px; color: #fff; }
+.xpbar { margin: 10px 0 4px; height: 10px; background: #1a1a1a; border-radius: 6px; overflow: hidden; border: 1px solid #3d5a2d; }
+.xpfill { height: 100%; background: linear-gradient(90deg, #6f8f2a, #c9e265); }
+.xpmeta { font-size: 12px; color: #8a9a7a; }
+.stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-top: 14px; }
+.stats div { background: #121812; border: 1px solid #2a3a22; border-radius: 6px; padding: 8px 4px; }
+.stats b { display: block; font-size: 18px; color: #fff; }
+.stats span { font-size: 11px; color: #8a9a7a; }
+.loadout { margin-top: 12px; font-size: 13px; color: #b7c4a3; }
+.shop-banner { text-align: left; background: #1a2414; border: 1px solid #3d5a2d; border-radius: 6px; padding: 10px 12px; font-size: 13px; color: #c9e265; margin-bottom: 10px; }
+.shop-banner.soon { color: #ffd54f; border-color: #8a7018; background: #2a220c; }
+.item-grid { display: grid; grid-template-columns: 1fr; gap: 8px; }
+.item-card { display: grid; grid-template-columns: 36px 1fr auto; gap: 10px; align-items: center; text-align: left; background: #121812; border: 1px solid #2a3a22; border-radius: 8px; padding: 8px 10px; }
+.item-card.equipped { border-color: #6f8f2a; }
+.item-card button { width: auto; margin: 0; padding: 8px 12px; font-size: 13px; white-space: nowrap; }
+.item-card .iname { font-weight: bold; font-size: 14px; }
+.item-card .iprice { font-size: 12px; color: #8a9a7a; }
+.swatch { width: 32px; height: 32px; border-radius: 4px; border: 1px solid #000; display: inline-block; }
+.swatch.tag { border-radius: 16px; }
+table.board { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.board th, table.board td { padding: 6px 4px; border-bottom: 1px solid #2a3a22; text-align: left; }
+table.board th { color: #8a9a7a; font-weight: normal; }
+table.board tr.me td { color: #c9e265; font-weight: bold; }
+@media (min-width: 520px) {
+  .item-grid { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 420px) {
+  h1 { font-size: 36px; letter-spacing: 4px; }
+  .panel { padding: 18px 14px; }
+  .stats { grid-template-columns: repeat(3, 1fr); }
+  .item-card { grid-template-columns: 28px 1fr; }
+  .item-card button { grid-column: 1 / -1; }
+}

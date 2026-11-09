@@ -110,6 +110,43 @@ licence note is in `public/models/LICENSE.txt`.
 On phones the soldiers share the one loaded model, skip per-mesh shadows and use the same lower
 pixel ratio / lighter map shadows as the rest of the client.
 
+
+## Accounts, progress and shop
+
+You can still **DEPLOY as a guest** with just a callsign. Guests cannot buy cosmetics.
+
+Create an account (username + password, optional email) in the menu to save progress and use the shop. Sessions are an httpOnly cookie.
+
+- **Progress** — total kills, deaths, wins, matches, XP and level are stored per account. A kill is worth 50 XP; winning a round is worth 200 XP. Level goes up every 250 XP.
+- **Leaderboard** — the top 20 accounts by XP.
+- **Shop** — cosmetic only: soldier camo (Olive Field is free; Green Eagles, Desert Tan, Urban Grey, Ankara Pattern, Gold), rifle skins (Standard Issue is free; Carbon, Green-White-Green, Gold) and name-tag colours (Crimson is free). Prices are ₦500–₦2,000. Equip/unequip is validated on the server and the equipped look is sent to other players.
+
+### Payments (Paystack)
+
+Checkout is [Paystack Standard](https://paystack.com/docs/payments/accept-payments): the server initializes the transaction, the player is redirected to Paystack, then the server verifies the payment with `/transaction/verify` **and** a webhook at `/api/paystack/webhook` (HMAC SHA512 of the raw body, `x-paystack-signature`). The item is granted only after a successful verification. Repeats of the same reference are idempotent. Amounts are in kobo.
+
+If `PAYSTACK_SECRET_KEY` and `PAYSTACK_PUBLIC_KEY` are not set, the shop shows **Payments coming soon**. A DEV-only fake-purchase path exists for local testing (`ALLOW_DEV_PURCHASES=1` and not production) and is disabled in production.
+
+**To take real (or test) payments, Peter needs to:**
+
+1. Create a Paystack account at [paystack.com](https://paystack.com/) and complete business verification for live charges (test payments work before that).
+2. Open **Settings → API Keys & Webhooks** (or Developer settings) in the Paystack dashboard.
+3. Copy the **test** secret and public keys first. Set them as environment variables on the Render web service `oba-fps`:
+   - `PAYSTACK_SECRET_KEY` — `sk_test_…` then later `sk_live_…`
+   - `PAYSTACK_PUBLIC_KEY` — `pk_test_…` then later `pk_live_…`
+   - Optional: `PUBLIC_URL` = `https://oba-fps.onrender.com`
+4. Paste this webhook URL into Paystack (test mode, then live mode):  
+   `https://oba-fps.onrender.com/api/paystack/webhook`
+5. Switch to live keys only after a test purchase works. Paystack's standard rate on local cards is typically 1.5% + ₦100 per transaction (capped; international cards are higher — check the current [Paystack pricing](https://paystack.com/pricing) page).
+
+This repository does not include any Paystack keys.
+
+### Database
+
+Accounts need PostgreSQL. On Render we use a **Free** Postgres instance named `oba-fps-db` in Frankfurt, wired to the web service as `DATABASE_URL` (internal URL). Locally, if `DATABASE_URL` is unset, the server uses an in-memory database (PGlite) so `npm test` and `npm start` still work.
+
+**Free Render Postgres limits (official docs):** 1 GB storage, one free database per workspace, **expires 30 days after creation**, then a 14-day grace period to upgrade before the database and its data are deleted. No backups, no managed pooling, may restart or have maintenance at any time. For real players, upgrade to a paid plan (from about $6–19/month) before expiry or progress and purchases will be lost.
+
 ## Rules
 100 HP. A body shot does 25, a headshot does 50. Armour absorbs about two-thirds of each hit (up to the
 armour you have left); leftover damage goes to health. After 5 seconds without taking damage, health
