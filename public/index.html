@@ -2,7 +2,10 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <title>Frontline: Oba — Multiplayer FPS</title>
 <link rel="icon" href="data:," />
 <link rel="stylesheet" href="/style.css" />
@@ -26,7 +29,27 @@
   <div id="death" class="hidden"><div class="big">YOU WERE KILLED</div><div id="killedby"></div><div id="respawn"></div></div>
   <div id="roundend" class="hidden"><div class="big" id="winner"></div><div id="roundtimer"></div></div>
   <div id="scoreboard" class="hidden"><h2>SCOREBOARD — <span id="sbmap"></span></h2><table><thead><tr><th></th><th>Player</th><th>Kills</th><th>Deaths</th><th>K/D</th><th>Voice</th></tr></thead><tbody id="sbbody"></tbody></table><div class="sbhint">First to <span id="sbwin">20</span> kills wins the round · Press Esc to free the mouse and click 🔇 to mute a player</div>
-    <div id="settings"><label><input type="checkbox" id="openmic" /> Microphone on (V)</label><label>Voice volume <input type="range" id="voicevol" min="0" max="1" step="0.05" /></label><span class="hint">Voice is open-mic: <b>V</b> mutes/unmutes you · <b>T</b>/<b>Enter</b> to chat</span></div></div>
+    <div id="settings"><label><input type="checkbox" id="openmic" /> Microphone on (V)</label><label>Voice volume <input type="range" id="voicevol" min="0" max="1" step="0.05" /></label><span class="hint desktop-only">Voice is open-mic: <b>V</b> mutes/unmutes you · <b>T</b>/<b>Enter</b> to chat</span><span class="hint mobile-only">Voice is open-mic: tap 🎤 to mute/unmute · CHAT to type</span></div>
+    <button type="button" id="sbclose" class="mobile-only">Close</button></div>
+</div>
+
+
+<div id="touchui" class="hidden">
+  <div id="touchpad"></div>
+  <div id="joybase" class="hidden"><div id="joystick"></div></div>
+  <div id="touchbtns">
+    <button type="button" id="btnMic" class="tb sm" aria-label="Microphone">🎤</button>
+    <button type="button" id="btnChat" class="tb sm" aria-label="Chat">CHAT</button>
+    <button type="button" id="btnScore" class="tb sm" aria-label="Scoreboard">TAB</button>
+    <button type="button" id="btnReload" class="tb mid" aria-label="Reload">R</button>
+    <button type="button" id="btnAim" class="tb mid" aria-label="Aim">AIM</button>
+    <button type="button" id="btnJump" class="tb mid" aria-label="Jump">JUMP</button>
+    <button type="button" id="btnFire" class="tb big" aria-label="Fire">FIRE</button>
+  </div>
+  <div id="rotatehint" class="hidden">
+    <span>↻ Rotate your phone sideways for a better view</span>
+    <button type="button" id="rotateok">OK</button>
+  </div>
 </div>
 
 <div id="menu">
@@ -36,11 +59,16 @@
     <input id="name" maxlength="16" placeholder="Enter your callsign" autocomplete="off" />
     <button id="play">DEPLOY</button>
     <div id="status"></div>
-    <div class="controls">
+    <div class="controls desktop-only">
       <div><b>WASD</b> move</div><div><b>Mouse</b> look</div><div><b>Space</b> jump</div><div><b>Shift</b> sprint</div>
       <div><b>Left click</b> shoot</div><div><b>Right click</b> aim</div><div><b>R</b> reload</div><div><b>Tab</b> scoreboard</div><div><b>T / Enter</b> text chat</div><div><b>V</b> mute / unmute mic</div>
     </div>
-    <div class="tip">Voice chat is on by default: your browser will ask for the microphone when you deploy.<br>Share this page's link with friends so they can join the same match.</div>
+    <div class="controls mobile-only">
+      <div><b>Left thumb</b> move (push far to sprint)</div><div><b>Right drag</b> look</div>
+      <div><b>FIRE</b> hold to shoot</div><div><b>AIM</b> sights</div>
+      <div><b>JUMP</b> / <b>R</b> reload</div><div><b>CHAT</b> · <b>🎤</b> mute · <b>TAB</b></div>
+    </div>
+    <div class="tip">Voice chat is on by default: your browser will ask for the microphone when you deploy.<br><span class="mobile-only">On a phone, on-screen joystick and buttons appear after DEPLOY. Landscape is recommended.</span><span class="desktop-only">Share this page's link with friends so they can join the same match.</span></div>
   </div>
 </div>
 <script type="module" src="/main.js"></script>

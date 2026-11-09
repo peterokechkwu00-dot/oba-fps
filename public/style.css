@@ -71,3 +71,87 @@ h1 { margin: 0; font-size: 56px; letter-spacing: 10px; color: #c9e265; text-shad
 #micstatus { position: absolute; left: 24px; bottom: 300px; padding: 5px 12px; border-radius: 4px; font-weight: bold; font-size: 13px; background: rgba(0,0,0,.55); }
 #micstatus.live { background: rgba(30,110,40,.7); } #micstatus.live.speaking { background: rgba(40,170,60,.9); box-shadow: 0 0 10px rgba(80,255,100,.6); }
 #micstatus.muted { background: rgba(150,30,30,.8); } #micstatus.denied { background: rgba(170,90,0,.85); } #micstatus.off { color: #bbb; }
+
+/* ---- Prevent scroll, zoom and long-press on the game canvas ---- */
+html, body, #game, #game canvas, #hud, #touchui, #touchpad {
+  touch-action: none;
+  overscroll-behavior: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+html, body { width: 100%; height: 100%; height: 100dvh; }
+input, textarea { -webkit-user-select: text; user-select: text; touch-action: auto; }
+
+.mobile-only { display: none !important; }
+body.touch .mobile-only { display: revert !important; }
+body.touch .desktop-only { display: none !important; }
+body.touch .controls.mobile-only { display: grid !important; }
+
+/* Touch control overlay */
+#touchui { position: fixed; inset: 0; z-index: 15; pointer-events: none; }
+#touchpad { position: absolute; inset: 0; pointer-events: auto; touch-action: none; }
+#joybase {
+  position: absolute; width: 136px; height: 136px; margin: -68px 0 0 -68px;
+  border-radius: 50%; border: 2px solid rgba(255,255,255,.35);
+  background: rgba(0,0,0,.28); pointer-events: none; z-index: 16;
+}
+#joystick {
+  position: absolute; left: 50%; top: 50%; width: 64px; height: 64px; margin: 0;
+  border-radius: 50%; background: rgba(255,255,255,.55); border: 2px solid rgba(255,255,255,.8);
+  box-shadow: 0 0 8px rgba(0,0,0,.4); transform: translate(-50%,-50%);
+}
+#touchbtns { position: absolute; inset: 0; pointer-events: none; z-index: 17; }
+.tb {
+  pointer-events: auto; position: absolute;
+  border: 2px solid rgba(255,255,255,.35); background: rgba(12,16,12,.45);
+  color: #fff; font-weight: 800; letter-spacing: 1px; border-radius: 50%;
+  font-family: inherit; -webkit-tap-highlight-color: transparent;
+  touch-action: none; user-select: none;
+}
+.tb:active, .tb.on { background: rgba(111,143,42,.7); border-color: #c9e265; }
+.tb.muted { background: rgba(150,30,30,.65); }
+.tb.big { width: 96px; height: 96px; font-size: 18px; right: max(16px, env(safe-area-inset-right)); bottom: max(20px, env(safe-area-inset-bottom)); }
+.tb.mid { width: 64px; height: 64px; font-size: 12px; }
+#btnJump { right: max(16px, env(safe-area-inset-right)); bottom: calc(max(20px, env(safe-area-inset-bottom)) + 108px); }
+#btnAim  { right: calc(max(16px, env(safe-area-inset-right)) + 108px); bottom: max(28px, env(safe-area-inset-bottom)); }
+#btnReload { right: calc(max(16px, env(safe-area-inset-right)) + 100px); bottom: calc(max(20px, env(safe-area-inset-bottom)) + 96px); }
+.tb.sm { width: 48px; height: 48px; font-size: 11px; letter-spacing: 0; border-radius: 50%; top: max(52px, env(safe-area-inset-top)); }
+#btnMic { right: calc(max(10px, env(safe-area-inset-right)) + 112px); }
+#btnChat { right: calc(max(10px, env(safe-area-inset-right)) + 56px); }
+#btnScore { right: max(10px, env(safe-area-inset-right)); }
+#rotatehint {
+  pointer-events: auto; position: absolute; top: max(112px, calc(env(safe-area-inset-top) + 100px)); left: 50%;
+  transform: translateX(-50%); background: rgba(0,0,0,.78); border: 1px solid #6f8f2a;
+  padding: 10px 12px; border-radius: 8px; display: flex; gap: 12px; align-items: center;
+  font-size: 14px; z-index: 20; width: max-content; max-width: 92vw;
+}
+#rotatehint.hidden { display: none !important; }
+#rotateok { background: #6f8f2a; color: #fff; border: 0; border-radius: 4px; padding: 6px 12px; font-weight: bold; }
+
+#sbclose { margin-top: 12px; width: 100%; padding: 10px; font-size: 16px; font-weight: bold; background: #6f8f2a; color: #fff; border: 0; border-radius: 6px; }
+
+/* Compact HUD on phones */
+body.touch #topbar { font-size: 11px; padding: 4px 8px; gap: 8px; max-width: min(48vw, 220px); overflow: hidden; text-overflow: ellipsis; top: max(6px, env(safe-area-inset-top)); }
+body.touch #killfeed { top: max(36px, calc(env(safe-area-inset-top) + 28px)); right: 8px; width: min(46vw, 220px); font-size: 11px; }
+body.touch #health { left: max(8px, env(safe-area-inset-left)); top: max(8px, env(safe-area-inset-top)); bottom: auto; transform: scale(.82); transform-origin: top left; }
+body.touch #ammo { right: auto; left: max(8px, env(safe-area-inset-left)); top: max(46px, calc(env(safe-area-inset-top) + 38px)); bottom: auto; padding: 4px 10px; transform: scale(.82); transform-origin: top left; }
+body.touch #mag { font-size: 28px; }
+body.touch #micstatus { left: max(8px, env(safe-area-inset-left)); top: max(96px, calc(env(safe-area-inset-top) + 86px)); bottom: auto; font-size: 11px; padding: 3px 8px; }
+body.touch #chat { left: max(8px, env(safe-area-inset-left)); bottom: 42%; width: min(70vw, 320px); }
+body.touch #chatlog { max-height: 28vh; font-size: 12px; }
+body.touch #chat.open { top: max(52px, env(safe-area-inset-top)); bottom: auto; width: calc(100% - 16px); left: 8px; z-index: 22; pointer-events: auto; }
+body.touch #clickhint { display: none !important; }
+body.touch #scoreboard { top: 8%; width: min(620px, 96vw); max-height: 80vh; overflow: auto; padding: 12px 14px; }
+body.touch .big { font-size: 32px; letter-spacing: 1px; }
+body.touch h1 { font-size: 40px; letter-spacing: 4px; }
+body.touch .panel { padding: 20px 16px; width: min(520px, 94vw); }
+
+/* Portrait: slightly tighter buttons so thumbs can reach them */
+body.touch.portrait .tb.big { width: 88px; height: 88px; font-size: 16px; }
+body.touch.portrait #btnJump { bottom: calc(max(16px, env(safe-area-inset-bottom)) + 100px); }
+body.touch.portrait #btnAim { right: calc(max(12px, env(safe-area-inset-right)) + 100px); }
+body.touch.portrait #btnReload { right: calc(max(12px, env(safe-area-inset-right)) + 92px); bottom: calc(max(16px, env(safe-area-inset-bottom)) + 90px); }
+
+body.touch #chatinput, body.touch #name { font-size: 16px; }

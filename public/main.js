@@ -9,6 +9,7 @@ import { Soldier } from './avatar.js';
 import * as sfx from './audio.js';
 import { buildRifle, flashTexture } from './weapon.js';
 import * as comms from './comms.js';
+import { isTouch, state as touch, LOOK_SENS, initTouch, requestImmersive, setTouchVisible, setAiming, refreshMic } from './touch.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 const $ = id => document.getElementById(id);
@@ -17,8 +18,8 @@ for (const id of ['mapname', 'menumap', 'sbmap']) $(id).textContent = MAP_NAME;
 $('name').value = localStorage.getItem('fps-name') || '';
 
 // ---------- Renderer / scene ----------
-const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: params.has('autojoin') });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+const renderer = new THREE.WebGLRenderer({ antialias: !isTouch, powerPreference: isTouch ? 'high-performance' : 'default', preserveDrawingBuffer: params.has('autojoin') });
+renderer.setPixelRatio(Math.min(devicePixelRatio, isTouch ? 1.5 : 2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.autoClear = false;
 renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -28,7 +29,7 @@ const BASE_FOV = 75, ADS_FOV = 50;
 const camera = new THREE.PerspectiveCamera(BASE_FOV, innerWidth / innerHeight, 0.05, 400);
 camera.rotation.order = 'YXZ';
 scene.add(camera);
-const { colliders } = buildWorld(scene, renderer);
+const { colliders } = buildWorld(scene, renderer, { low: isTouch });
 addEventListener('resize', () => { camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); weaponCamera.aspect = camera.aspect; weaponCamera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); });
 
 // ---------- First-person weapon (own scene + camera so it never clips into walls) ----------
@@ -84,7 +85,7 @@ const handlers = {
     me.id = m.id; me.seq = m.seq; winKills = m.win; roster = m.list; roundOver = m.roundOver;
     me.pos.set(...m.p); me.yaw = m.yaw; me.alive = true; me.hp = MAX_HP;
     joined = true; $('menu').classList.add('hidden'); $('hud').classList.remove('hidden'); $('sbwin').textContent = winKills;
-    updateScore(); comms.chatLine('', `Welcome to ${MAP_NAME}, ${nameOf(me.id)}! Voice chat is open-mic — press V to mute/unmute, T to type.`, 'sys');
+    updateScore(); comms.chatLine('', `Welcome to ${MAP_NAME}, ${nameOf(me.id)}! ` + (isTouch ? 'Voice is open-mic — tap 🎤 to mute, CHAT to type.' : 'Voice chat is open-mic — press V to mute/unmute, T to type.'), 'sys');
     for (const r of roster) if (r.talk) comms.talking.add(r.id);
     comms.connectVoice(m.list);
   },
@@ -177,23 +178,50 @@ comms.initComms({
 });
 $('sbbody').addEventListener('click', e => { const b = e.target.closest('button.mute'); if (!b) return; comms.toggleMute(Number(b.dataset.id)); renderScoreboard(); });
 
+function toggleScoreboard() {
+  const sb = $('scoreboard');
+  if (sb.classList.contains('hidden')) { renderScoreboard(); sb.classList.remove('hidden'); sb.classList.add('interactive'); }
+  else if (!roundOver) { sb.classList.add('hidden'); sb.classList.remove('interactive'); }
+}
+initTouch({
+  onLook(dx, dy) {
+    if (!me.alive) return;
+    const sens = LOOK_SENS * (aiming ? 0.55 : 1);
+    me.yaw -= dx * sens;
+    me.pitch = Math.max(-1.5, Math.min(1.5, me.pitch - dy * sens));
+    anim.swayX = Math.max(-0.04, Math.min(0.04, anim.swayX + dx * 0.00015));
+    anim.swayY = Math.max(-0.04, Math.min(0.04, anim.swayY + dy * 0.00015));
+  },
+  onAimToggle() { if (me.alive) { aiming = !aiming; setAiming(aiming); } },
+  onReload() { startReload(); },
+  onFireStart() { if (me.ammo === 0 && !me.reloading) { sfx.empty(); startReload(); } },
+  onMic() { comms.toggleMic(); refreshMic(comms.micState()); },
+  onChat() { if (comms.isChatting()) comms.closeChat(); else comms.openChat(); },
+  onScore() { toggleScoreboard(); },
+  onScoreClose() { if (!roundOver) { $('scoreboard').classList.add('hidden'); $('scoreboard').classList.remove('interactive'); } },
+});
+
 // ---------- Input ----------
 function showMenu() { $('menu').classList.remove('hidden'); $('hud').classList.add('hidden'); }
 function join() {
   const name = $('name').value.trim() || `Soldier${Math.floor(Math.random() * 900 + 100)}`;
-  localStorage.setItem('fps-name', name); sfx.init(); connect(name); lock(); comms.startVoice();
+  localStorage.setItem('fps-name', name); sfx.init();
+  if (isTouch) { requestImmersive(); setTouchVisible(true); }
+  else lock();
+  connect(name); comms.startVoice();
 }
 $('play').onclick = join;
 $('name').addEventListener('keydown', e => { if (e.key === 'Enter') join(); });
-function lock() { try { const p = renderer.domElement.requestPointerLock(); p?.catch?.(() => {}); } catch {} }
+function lock() { if (isTouch) return; try { const p = renderer.domElement.requestPointerLock(); p?.catch?.(() => {}); } catch {} }
 document.addEventListener('pointerlockchange', () => {
+  if (isTouch) return;
   const was = locked; locked = document.pointerLockElement === renderer.domElement;
   const sb = $('scoreboard');
   if (!locked) { mouseDown = false; aiming = false; if (was && joined) { renderScoreboard(); sb.classList.remove('hidden'); sb.classList.add('interactive'); } }
   else { sb.classList.remove('interactive'); if (!roundOver) sb.classList.add('hidden'); }
 });
 renderer.domElement.addEventListener('mousedown', e => {
-  if (!joined) return; sfx.init();
+  if (!joined || isTouch) return; sfx.init();
   if (!locked) { lock(); return; }
   if (e.button === 0) { mouseDown = true; if (me.ammo === 0 && !me.reloading) { sfx.empty(); startReload(); } }
   if (e.button === 2) aiming = true;
@@ -234,16 +262,17 @@ function moveAxis(i, amt) {
   const L = ARENA_HALF - R; p[key] = Math.max(-L, Math.min(L, p[key]));
 }
 function physics(dt) {
-  const fwd = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0), str = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0);
-  const sprint = keys.ShiftLeft || keys.ShiftRight;
-  const speed = !me.alive ? 0 : (aiming ? 3.2 : sprint && fwd > 0 ? 8.5 : 5.5);
+  const fwd = (keys.KeyW ? 1 : 0) - (keys.KeyS ? 1 : 0) + (touch.fwd || 0);
+  const str = (keys.KeyD ? 1 : 0) - (keys.KeyA ? 1 : 0) + (touch.str || 0);
+  const sprint = keys.ShiftLeft || keys.ShiftRight || touch.sprint;
+  const speed = !me.alive ? 0 : (aiming ? 3.2 : sprint && fwd > 0.2 ? 8.5 : 5.5);
   const sin = Math.sin(me.yaw), cos = Math.cos(me.yaw);
   let wx = -sin * fwd + cos * str, wz = -cos * fwd - sin * str; const l = Math.hypot(wx, wz);
   if (l > 0) { wx /= l; wz /= l; }
   const accel = me.onGround ? 14 : 3;
   me.vel.x += (wx * speed - me.vel.x) * Math.min(1, accel * dt);
   me.vel.z += (wz * speed - me.vel.z) * Math.min(1, accel * dt);
-  if (me.alive && keys.Space && me.onGround) { me.vel.y = 7; me.onGround = false; }
+  if (me.alive && (keys.Space || touch.jump) && me.onGround) { me.vel.y = 7; me.onGround = false; }
   me.vel.y -= 20 * dt;
   const wasGround = me.onGround;
   moveAxis(0, me.vel.x * dt); moveAxis(2, me.vel.z * dt);
@@ -353,7 +382,7 @@ function frame(now) {
     // reload
     if (me.reloading && now >= me.reloadEnd) { const n = Math.min(MAG_SIZE - me.ammo, me.reserve); me.ammo += n; me.reserve -= n; me.reloading = false; }
     const hs = physics(dt);
-    if (mouseDown && locked) shoot(now, hs > 1.5);
+    if ((mouseDown && locked) || (isTouch && touch.fire)) shoot(now, hs > 1.5);
     me.recoil = Math.max(0, me.recoil - dt * 0.35);
     // camera
     if (me.alive) {
@@ -392,7 +421,8 @@ function frame(now) {
     $('mag').textContent = me.ammo; $('reserve').textContent = me.reserve;
     $('mag').style.color = me.ammo <= 5 ? '#ff5252' : '';
     $('reloading').classList.toggle('hidden', !me.reloading);
-    $('clickhint').classList.toggle('hidden', locked || !me.alive || roundOver);
+    $('clickhint').classList.toggle('hidden', isTouch || locked || !me.alive || roundOver);
+    if (isTouch) refreshMic(comms.micState());
     const gap = 6 + (me.recoil * 120) + (hs > 1.5 ? 6 : 0) + (me.onGround ? 0 : 10) - (aiming ? 4 : 0);
     const ch = $('crosshair').children; ch[0].style.top = `${-gap - 9}px`; ch[1].style.top = `${gap}px`; ch[2].style.left = `${-gap - 9}px`; ch[3].style.left = `${gap}px`;
     $('crosshair').style.display = aiming ? 'none' : '';
@@ -413,4 +443,4 @@ requestAnimationFrame(frame);
 
 // Test hook: ?autojoin=Name joins immediately (used for headless screenshots)
 if (params.has('autojoin')) { $('name').value = params.get('autojoin') || 'Tester'; join(); }
-window.__game = { me, remotes, comms, anim, rifle, setAim: v => (aiming = v), reload: () => startReload(), fire: () => { me.lastShot = 0; shoot(performance.now(), false); }, get joined() { return joined; } };
+window.__game = { me, remotes, comms, anim, rifle, touch, isTouch, setAim: v => { aiming = v; setAiming(v); }, reload: () => startReload(), fire: () => { me.lastShot = 0; shoot(performance.now(), false); }, get joined() { return joined; } };

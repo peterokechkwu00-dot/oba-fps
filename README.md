@@ -39,6 +39,20 @@ Other people on your network can join at `http://<your-ip>:3000`.
 | Tab (hold) | Scoreboard (+ voice mute buttons) |
 | T or Enter | Text chat (Enter sends, Esc cancels) |
 | V | Mute / unmute your microphone (voice is open-mic by default) |
+
+### On a phone or tablet
+After you tap **DEPLOY**, on-screen controls appear (no mouse lock). Rotate to landscape if you can — there is a dismissable hint.
+
+| Control | Action |
+|---------|--------|
+| Left half of the screen | Virtual joystick appears under your thumb. Move to walk; push the stick far forward to sprint |
+| Drag on the right half | Look around |
+| **FIRE** (hold) | Shoot. You can drag on FIRE to look while shooting |
+| **AIM** | Aim down sights (toggle) |
+| **JUMP** / **R** | Jump / reload |
+| **CHAT** / **🎤** / **TAB** | Type a message, mute your mic, open the scoreboard |
+
+The page blocks scrolling, pinch-zoom and pull-to-refresh. On phones the renderer uses a lower pixel ratio and lighter shadows so it stays smooth.
 | Esc | Release mouse |
 
 ## Communication

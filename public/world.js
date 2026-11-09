@@ -232,7 +232,8 @@ function buildPalm(h) {
   return g;
 }
 
-export function buildWorld(scene, renderer) {
+export function buildWorld(scene, renderer, opts = {}) {
+  const low = !!opts.low;
   maxAniso = renderer.capabilities.getMaxAnisotropy();
   const colliders = []; // meshes used for bullet raycasts (match the server's collision boxes)
 
@@ -242,7 +243,7 @@ export function buildWorld(scene, renderer) {
   scene.add(new THREE.HemisphereLight('#cfe8ff', '#a0643a', 1.1));
   const sun = new THREE.DirectionalLight('#fff0d0', 2.4);
   sun.position.set(30, 55, 20); sun.castShadow = true;
-  sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.mapSize.set(low ? 1024 : 2048, low ? 1024 : 2048);
   Object.assign(sun.shadow.camera, { left: -50, right: 50, top: 50, bottom: -50, near: 1, far: 140 });
   sun.shadow.bias = -0.0008; sun.shadow.normalBias = 0.03;
   scene.add(sun); scene.add(sun.target);
