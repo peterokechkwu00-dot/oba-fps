@@ -29,7 +29,11 @@ const REGEN_HP_S = Number(process.env.REGEN_RATE) || REGEN_RATE;
 const app = express();
 app.use('/vendor/jsm', express.static(path.join(__dirname, 'node_modules/three/examples/jsm'), { maxAge: '7d' }));
 app.use('/vendor/three', express.static(path.join(__dirname, 'node_modules/three/build'), { maxAge: '7d' }));
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders(res, filePath) {
+    if (filePath.endsWith('.glb')) res.setHeader('Content-Type', 'model/gltf-binary');
+  },
+}));
 app.get('/health', (_req, res) => res.json({
   ok: true,
   players: [...players.values()].filter(p => !p.bot).length,

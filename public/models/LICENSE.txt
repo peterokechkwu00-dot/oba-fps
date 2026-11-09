@@ -1,0 +1,15 @@
+Soldier.glb
+-----------
+Source: three.js examples (r170)
+  https://github.com/mrdoob/three.js/blob/r170/examples/models/gltf/Soldier.glb
+  used in the official "webgl_animation_skinning_blending" example.
+
+The character (Adobe Mixamo "Vanguard") and its Idle / Walk / Run / TPose
+clips come from https://www.mixamo.com/. Adobe Mixamo's terms allow using
+these characters and animations in games and other projects, including
+commercially. This file is redistributed as part of the game, not as a
+standalone character pack.
+
+three.js itself is licensed under the MIT License
+  https://github.com/mrdoob/three.js/blob/r170/LICENSE
+  Copyright © 2010-2024 three.js authors.

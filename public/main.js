@@ -6,7 +6,7 @@ import {
 } from './shared/map.js';
 import { buildWorld } from './world.js';
 import { createPickupField } from './pickups.js';
-import { Soldier } from './avatar.js';
+import { Soldier, preloadSoldiers, setSoldierQuality } from './avatar.js';
 import * as sfx from './audio.js';
 import { buildRifle, flashTexture } from './weapon.js';
 import * as comms from './comms.js';
@@ -23,6 +23,7 @@ renderer.setPixelRatio(Math.min(devicePixelRatio, isTouch ? 1.5 : 2));
 renderer.setSize(innerWidth, innerHeight);
 renderer.autoClear = false;
 renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+setSoldierQuality(isTouch); preloadSoldiers();
 $('game').appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 const BASE_FOV = 75, ADS_FOV = 50;
@@ -491,9 +492,12 @@ function frame(now) {
       const root = r.s.root;
       root.position.set(a.x + (c.x - a.x) * k, a.y + (c.y - a.y) * k, a.z + (c.z - a.z) * k);
       root.rotation.y = lerpAngle(a.yaw, c.yaw, k);
-      const sp = Math.hypot(root.position.x - r.last.x, root.position.z - r.last.z) / Math.max(dt, 1e-3);
-      r.speed += (sp - r.speed) * Math.min(1, dt * 10); r.last.copy(root.position);
-      r.s.update(dt, r.speed, a.pitch + (c.pitch - a.pitch) * k);
+      const vx = (root.position.x - r.last.x) / Math.max(dt, 1e-3);
+      const vz = (root.position.z - r.last.z) / Math.max(dt, 1e-3);
+      const sp = Math.hypot(vx, vz);
+      r.speed += (sp - r.speed) * Math.min(1, dt * 10);
+      r.s.update(dt, r.speed, a.pitch + (c.pitch - a.pitch) * k, { y: root.position.y, vx, vz, yaw: root.rotation.y });
+      r.last.copy(root.position);
     }
     // HUD
     $('hpnum').textContent = Math.ceil(me.hp); $('hpfill').style.width = `${Math.max(0, Math.min(100, me.hp))}%`;

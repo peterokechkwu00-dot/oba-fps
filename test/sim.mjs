@@ -116,6 +116,19 @@ function overlapsPlayer(x, y, z, a, r = PR, h = PH) {
   return x + r > a.min[0] && x - r < a.max[0] && z + r > a.min[2] && z - r < a.max[2] && y + h > a.min[1] && y < a.max[1];
 }
 
+log('--- soldier model ---');
+try {
+  const glb = await import('fs/promises').then(fs => fs.readFile(path.join(ROOT, 'public/models/Soldier.glb')));
+  const magic = glb.readUInt32LE(0);
+  check(magic === 0x46546C67 && glb.length > 100000, `Soldier.glb is a glTF binary (${glb.length} bytes)`);
+  const jsonLen = glb.readUInt32LE(12);
+  const json = JSON.parse(glb.slice(20, 20 + jsonLen).toString('utf8'));
+  const clips = (json.animations || []).map(a => a.name).sort();
+  check(clips.join(',') === 'Idle,Run,TPose,Walk', `clips: ${clips.join(', ')}`);
+  const bones = (json.nodes || []).map(n => n.name);
+  check(['mixamorig:Hips','mixamorig:Spine2','mixamorig:Head','mixamorig:RightHand'].every(b => bones.includes(b)), 'mixamo hips/spine/head/right-hand bones present');
+} catch (e) { ok = false; log('ERROR', e.message); }
+
 log('--- map data ---');
 try {
   const ids = listMaps().map(m => m.id);

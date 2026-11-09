@@ -91,6 +91,25 @@ and drawn in a separate pass so it never clips into walls. It has sway, bob, rec
 aim-down-sights through the red dot, a reload animation (the mag drops out, goes back in, then the charging
 handle is racked) and a star-shaped muzzle flash. Other players carry a lower-detail version of the same rifle.
 
+## Players
+Other players (including bots) are drawn as a rigged soldier, not a box figure. The mesh is the
+**Mixamo “Vanguard”** character shipped with the [three.js](https://threejs.org/) examples
+(`examples/models/gltf/Soldier.glb`, three.js r170), cloned per player with `SkeletonUtils.clone` so
+each one has its own skeleton and animation mixer. Idle, walk and run clips are blended by speed;
+strafing leans the hips; aim pitch is applied on the spine, neck and head after the mixer update;
+firing gives a short upper-body recoil; jumping uses a tucked-leg pose; dying plays a fall to the
+ground. The same procedural rifle is parented to the right-hand bone. Each soldier gets a camo tint
+from their player colour, plus a small coloured vest plate and helmet band so they stay readable at
+a distance. The model already includes a helmet visor. Name tags and the 🔊 speaking icon sit above
+the head bone; the head hitbox follows that bone so headshots stay lined up.
+
+The character and its animations come from [Mixamo](https://www.mixamo.com/) and are used under
+Adobe Mixamo’s terms (they may be included in games). three.js itself is MIT-licensed. A short
+licence note is in `public/models/LICENSE.txt`.
+
+On phones the soldiers share the one loaded model, skip per-mesh shadows and use the same lower
+pixel ratio / lighter map shadows as the rest of the client.
+
 ## Rules
 100 HP. A body shot does 25, a headshot does 50. Armour absorbs about two-thirds of each hit (up to the
 armour you have left); leftover damage goes to health. After 5 seconds without taking damage, health
@@ -118,7 +137,8 @@ a tie is broken at random. The current map name is shown in the HUD, the menu an
 - `public/shared/layout.js`: shared helpers and gameplay constants.
 - `public/world.js`: builds (and rebuilds) the 3D scene and canvas textures for the active map.
 - `public/pickups.js`: floating medkit, vest and ammo-crate models.
-- `public/avatar.js`: soldier models for other players, with name tags and hitboxes.
+- `public/avatar.js`: rigged third-person soldiers (glTF + animation mixer), name tags and hitboxes.
+- `public/models/Soldier.glb`: Mixamo Vanguard character (see `public/models/LICENSE.txt`).
 - `public/audio.js`: WebAudio-synthesised sound effects.
 - `public/weapon.js`: the procedural rifle (high and low detail) and the muzzle flash texture.
 - `public/comms.js`: text chat and WebRTC voice chat.
